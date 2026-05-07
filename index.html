@@ -375,9 +375,9 @@ body{display:flex;flex-direction:column}
 
         <p style="font-size:12px;color:var(--gray);margin-bottom:16px;line-height:1.6;">O <b style="color:var(--light);">Bolão dos Amigos da Jaqueira — Mundial FIFA 2026</b> está sujeito ao Regulamento exposto a seguir e, ao participar, o interessado estará concordando com todas as condições abaixo estipuladas.</p>
 
-        <p style="font-size:13px;color:var(--light);margin-bottom:10px;line-height:1.6;"><b>1.</b> O Bolão será implementado pelos Amigos da Jaqueira, sendo livre, entretanto, a participação de qualquer convidado. Quaisquer dúvidas sobre o Bolão e as condições para participação ou sobre este Regulamento serão sanadas pela <b style="color:var(--gold);">Comissão Organizadora</b>, formada por André Garcia, Luiz Felipe Santoro e Felipe Cassab.</p>
+        <p style="font-size:13px;color:var(--light);margin-bottom:10px;line-height:1.6;"><b>1.</b> O Bolão será implementado pelos Amigos da Jaqueira. Quaisquer dúvidas sobre o Bolão e as condições para participação do mesmo ou sobre este Regulamento serão sanadas pela <b style="color:var(--gold);">Comissão Organizadora</b>, formada por Rodrigo Capriles e Felipe Cassab.</p>
 
-        <p style="font-size:13px;color:var(--light);margin-bottom:10px;line-height:1.6;"><b>2.</b> A taxa de inscrição será de <b style="color:var(--gold);">R$ 300,00</b>, que deverá ser paga para liberação do acesso ao APP. Depósito: <b>Banco Itaú, Agência 7054, Conta 12288-7</b>, em nome de André Almeida Garcia (CPF 288.170.228-70).</p>
+        <p style="font-size:13px;color:var(--light);margin-bottom:10px;line-height:1.6;"><b>2.</b> A taxa de inscrição será de <b style="color:var(--gold);">R$ 150,00</b>, que deverá ser paga para liberação do acesso ao APP por meio do qual serão preenchidos os palpites. Referida taxa deverá ser depositada junto ao Banco Itaú, Agência n.º 3740, Conta n.º 00681-6, em nome de Felipe Roberto Cassab (CPF 278.403.648-02 – chave PIX 11996002078).</p>
 
         <p style="font-size:13px;color:var(--light);margin-bottom:10px;line-height:1.6;"><b>3.</b> Os vencedores serão determinados através de um ranking elaborado a partir da quantidade de pontos acumulados conforme descrito no item 6.</p>
 
@@ -386,7 +386,7 @@ body{display:flex;flex-direction:column}
           <p style="font-size:13px;color:var(--light);margin-bottom:4px;">🥇 1º lugar — <b style="color:var(--gold);">60%</b> do total arrecadado</p>
           <p style="font-size:13px;color:var(--light);margin-bottom:4px;">🥈 2º lugar — <b style="color:var(--gold);">30%</b> do total arrecadado</p>
           <p style="font-size:13px;color:var(--light);margin-bottom:6px;">🥉 3º lugar — <b style="color:var(--gold);">10%</b> do total arrecadado</p>
-          <p style="font-size:11px;color:var(--gray);line-height:1.5;">Em caso de empate na pontuação em qualquer das posições premiadas, o prêmio será igualmente dividido entre os empatados.</p>
+          <p style="font-size:11px;color:var(--gray);line-height:1.5;">§ único. Em caso de empate na pontuação em qualquer uma das posições premiadas, o prêmio será igualmente dividido entre os participantes empatados. A título de esclarecimento, se houver empate duplo na primeira colocação, os dois participantes dividirão 90% (60% + 30%). Se houver empate tríplice na primeira colocação, os três dividirão 100%. Em empate duplo na terceira colocação, cada um receberá 5%.</p>
         </div>
 
         <p style="font-size:13px;color:var(--light);margin-bottom:10px;line-height:1.6;"><b>5.</b> O pagamento dos prêmios será feito mediante depósito bancário após o término do Bolão.</p>
@@ -438,10 +438,10 @@ body{display:flex;flex-direction:column}
 
         <p style="font-size:13px;color:var(--light);margin-bottom:10px;line-height:1.6;"><b>10.</b> Ao inscrever-se, o participante declara estar de acordo com todos os termos deste Regulamento.</p>
 
-        <p style="font-size:13px;color:var(--light);margin-bottom:16px;line-height:1.6;"><b>11.</b> Toda situação não prevista será decidida pelo voto da maioria da Comissão Organizadora.</p>
+        <p style="font-size:13px;color:var(--light);margin-bottom:16px;line-height:1.6;"><b>11.</b> Toda e qualquer situação não prevista neste Regulamento será decidida, exclusivamente, pela Comissão Organizadora do Bolão dos Amigos da Jaqueira — Mundial FIFA 2026.</p>
 
         <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:12px;text-align:center;">
-          <p style="font-size:11px;color:var(--gray);">São Paulo, 03 de maio de 2026.</p>
+          <p style="font-size:11px;color:var(--gray);">São Paulo, 07 de maio de 2026.</p>
           <p style="font-size:11px;color:var(--gold);font-weight:600;margin-top:4px;">Comissão Organizadora</p>
           <p style="font-size:11px;color:var(--gray);">André Garcia · Luiz Felipe Santoro · Felipe Cassab</p>
         </div>
@@ -763,7 +763,7 @@ const COLORS_T = ['#a8c8ff','#f3b3ff','#80dfcf','#ffbc8a','#80e2a7','#ffd680','#
 const DEADLINE = new Date('2026-06-11T02:59:00Z');
 const ADMIN_PWD = 'jaqueira2026';
 const PTS_EXACT = 5, PTS_WINNER = 3;
-const TAXA = 300;
+const TAXA = 150;
 
 // Firebase REST
 const FB_PROJECT = 'bolao-jaqueira';
@@ -3583,9 +3583,9 @@ function renderPremiacao() {
   const total=Object.keys(state.users).length, arrecadado=total*TAXA;
   const scores=Object.keys(state.users).map(u=>({u,pts:calcPts(state.palpites[u]).pts})).sort((a,b)=>b.pts-a.pts);
   const prizes=[{medal:'🥇',place:'1º lugar',pct:60,cls:'gold'},{medal:'🥈',place:'2º lugar',pct:30,cls:'silver'},{medal:'🥉',place:'3º lugar',pct:10,cls:'bronze'}];
-  let html=`<div class="prize-total"><div style="font-size:11px;color:rgba(245,197,24,0.7);font-weight:600;letter-spacing:1px;margin-bottom:8px;">TOTAL ARRECADADO</div><div class="prize-total-val">${fmt(arrecadado)}</div><p style="font-size:13px;color:var(--gray);margin-top:6px;">${total} participante${total!==1?'s':''} × R$ 300,00</p></div>`;
+  let html=`<div class="prize-total"><div style="font-size:11px;color:rgba(245,197,24,0.7);font-weight:600;letter-spacing:1px;margin-bottom:8px;">TOTAL ARRECADADO</div><div class="prize-total-val">${fmt(arrecadado)}</div><p style="font-size:13px;color:var(--gray);margin-top:6px;">${total} participante${total!==1?'s':''} × R$ 150,00</p></div>`;
   html+=`<div class="card" style="margin-bottom:12px;"><div style="padding:14px 16px;"><p style="font-size:11px;color:var(--gold);font-weight:700;letter-spacing:1px;margin-bottom:10px;">DETALHES</p>`;
-  [{l:'Inscritos',v:total},{l:'Taxa',v:'R$ 300,00'},{l:'Total arrecadado',v:fmt(arrecadado),gold:true},{l:'Prazo',v:'10/06 às 23h59'}].forEach(r=>{ html+=`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid rgba(255,255,255,0.05);"><span style="font-size:14px;color:var(--gray);">${r.l}</span><span style="font-size:14px;font-weight:600;${r.gold?'color:var(--gold);':''}">${r.v}</span></div>`; });
+  [{l:'Inscritos',v:total},{l:'Taxa',v:'R$ 150,00'},{l:'Total arrecadado',v:fmt(arrecadado),gold:true},{l:'Prazo',v:'10/06 às 23h59'}].forEach(r=>{ html+=`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid rgba(255,255,255,0.05);"><span style="font-size:14px;color:var(--gray);">${r.l}</span><span style="font-size:14px;font-weight:600;${r.gold?'color:var(--gold);':''}">${r.v}</span></div>`; });
   html+='</div></div>';
   html+='<div class="card">';
   prizes.forEach((p,i)=>{ const val=arrecadado*p.pct/100; const ldr=scores[i]; html+=`<div class="prize-row"><div style="font-size:30px;flex-shrink:0;width:40px;text-align:center;">${p.medal}</div><div style="flex:1;"><p style="font-family:'Barlow Condensed';font-size:15px;font-weight:700;color:var(--light);">${p.place}</p><p style="font-size:12px;color:var(--gray);">${p.pct}%${ldr&&ldr.pts>0?' → '+uName(ldr.u).split(' ')[0]+' ('+ldr.pts+' pts)':' → A definir'}</p></div><div class="prize-val ${p.cls}">${fmt(val)}</div></div>`; });
