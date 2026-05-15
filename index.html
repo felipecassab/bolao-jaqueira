@@ -1202,7 +1202,7 @@ function renderGroupStandings(group, userPalpites) {
     });
   });
 
-  if (fpNeeded.length > 0 && !isPastDeadline()) {
+  if (fpNeeded.length > 0 && !isLocked()) {
     // Only show if all 6 group matches have been filled in
     var groupMatchesFilled = groupMatches2.every(function(m) {
       var p = userPalpites[m.id];
@@ -2005,7 +2005,7 @@ function closeFPModal() {
 }
 
 function setFairPlay(group, teamA, teamB, winner) {
-  if (!state.user || isPastDeadline()) return;
+  if (!state.user || isLocked()) return;
   if (!state.palpites[state.user]) state.palpites[state.user] = {};
   if (!state.palpites[state.user]._fp) state.palpites[state.user]._fp = {};
   var fp = state.palpites[state.user]._fp[group] || [];
@@ -2032,7 +2032,7 @@ function setFairPlay(group, teamA, teamB, winner) {
 }
 
 function setFairPlayThirds(orderedNames) {
-  if (!state.user || isPastDeadline()) return;
+  if (!state.user || isLocked()) return;
   if (!state.palpites[state.user]) state.palpites[state.user] = {};
   state.palpites[state.user]._fp3 = orderedNames.slice();
   try {
@@ -2048,7 +2048,7 @@ function setFairPlayThirds(orderedNames) {
 
 function setFairPlayRanking(group, orderedNames) {
   // Salva a ordem completa no _fp do grupo
-  if (!state.user || isPastDeadline()) return;
+  if (!state.user || isLocked()) return;
   if (!state.palpites[state.user]) state.palpites[state.user] = {};
   if (!state.palpites[state.user]._fp) state.palpites[state.user]._fp = {};
   state.palpites[state.user]._fp[group] = orderedNames.slice();
@@ -2062,7 +2062,7 @@ function setFairPlayRanking(group, orderedNames) {
 }
 
 function setPenalty(matchId, winner) {
-  if (!state.user || isPastDeadline()) return;
+  if (!state.user || isLocked()) return;
   if (!state.palpites[state.user]) state.palpites[state.user] = {};
   if (!state.palpites[state.user][matchId]) state.palpites[state.user][matchId] = {};
   state.palpites[state.user][matchId].pen = winner;
@@ -2278,6 +2278,17 @@ async function saveGlobal() {
   if (state.user && state.palpites[state.user]) {
     state.palpites[state.user]._savedAt = new Date().toISOString();
   }
+  // Garantir que _submitted nunca é perdido — verificar backup local
+  // Mas só restaurar se não foi explicitamente removido pelo admin (flag _adminUnsubmitted)
+  if (state.user && !state.palpites[state.user]?._submitted && !state.palpites[state.user]?._adminUnsubmitted) {
+    try {
+      const bk = JSON.parse(localStorage.getItem('bolao_backup') || '{}');
+      if (bk.palpites?.[state.user]?._submitted) {
+        if (!state.palpites[state.user]) state.palpites[state.user] = {};
+        state.palpites[state.user]._submitted = true;
+      }
+    } catch(e) {}
+  }
   const data = {users: state.users, palpites: state.palpites, results: state.results, snapshots: state.snapshots};
   try {
     await fbSet(data);
@@ -2303,7 +2314,21 @@ function startPolling() {
       // to avoid overwriting inputs the user is currently filling
       const onPalpites = document.getElementById('page-palpites')?.classList.contains('active');
       if (!onPalpites) {
+        // Preservar _submitted do Firebase — nunca deixar o state local sobrescrever
         state.palpites = s.palpites || {};
+        // Se Firebase tem _submitted, garantir que está no state
+        if (state.user && s.palpites?.[state.user]?._submitted) {
+          if (!state.palpites[state.user]) state.palpites[state.user] = {};
+          state.palpites[state.user]._submitted = true;
+          // Salvar no localStorage como cache
+          try {
+            const bk = JSON.parse(localStorage.getItem('bolao_backup') || '{}');
+            if (bk.palpites && bk.palpites[state.user]) {
+              bk.palpites[state.user]._submitted = true;
+              localStorage.setItem('bolao_backup', JSON.stringify(bk));
+            }
+          } catch(e) {}
+        }
       }
       renderRanking();
       renderHistorico();
@@ -2349,7 +2374,23 @@ function initials(n) { return n.split(' ').map(w=>w[0]).join('').slice(0,2).toUp
 function uColor(wpp) { const u=state.users[wpp]; return u?.color||COLORS[0]; }
 function uColorT(wpp) { const u=state.users[wpp]; return u?.colorT||COLORS_T[0]; }
 function uName(uid) { const u=state.users[uid]; return u?.apelido || u?.nome || u?.name || uid; }
+function avatarHtml(u, uid, extraStyle) {
+  const usr = u || (uid ? state.users[uid] : null);
+  const style = extraStyle || '';
+  if (usr && usr.photo) {
+    return '<div class="avatar" style="background:transparent;padding:0;overflow:hidden;' + style + '"><img src="' + usr.photo + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
+  }
+  const bg = usr ? (usr.color||COLORS[0]) : COLORS[0];
+  const cl = usr ? (usr.colorT||COLORS_T[0]) : COLORS_T[0];
+  const txt = usr ? initials(usr.apelido||usr.nome||usr.name||'') : '?';
+  return '<div class="avatar" style="background:' + bg + ';color:' + cl + ';' + style + '">' + txt + '</div>';
+}
+function openScoreModal(uid) { viewPalpites(uid); }
 function isPastDeadline() { return new Date() > DEADLINE; }
+function isSubmitted() {
+  return !!(state.user && state.palpites[state.user]?._submitted);
+}
+function isLocked() { return isPastDeadline() || isSubmitted(); }
 function hashPwd(p) { let h=0; for(let i=0;i<p.length;i++) h=(Math.imul(31,h)+p.charCodeAt(i))|0; return h.toString(36); }
 function phoneMask(inp) {
   let v=inp.value.replace(/\D/g,'');
@@ -2507,14 +2548,14 @@ function updateFloatBtn(page) {
   // Show on palpites page if logged in and before deadline
   var onPalpites = page === 'palpites' || 
     document.getElementById('page-palpites')?.classList.contains('active');
-  var show = onPalpites && !!state.user && !isPastDeadline();
+  var show = onPalpites && !!state.user && !isLocked();
   btn.style.display = show ? 'flex' : 'none';
 }
 function updateFAB() {
   const fab = document.getElementById('fab-draft');
   if (!fab) return;
   const onPalpites = document.getElementById('page-palpites')?.classList.contains('active');
-  const locked = isPastDeadline();
+  const locked = isLocked();
   if (onPalpites && !locked && state.user) {
     fab.classList.add('visible');
   } else {
@@ -2884,7 +2925,7 @@ function flagImg(code, cls='flag') {
   return `<img class="${cls}" src="https://flagcdn.com/w40/${code}.png" onerror="this.style.display=&quot;none&quot;"/>`;
 }
 function renderMatches() {
-  const locked = isPastDeadline();
+  const locked = isLocked();
   // Capturar valores atuais do DOM ANTES de destruir (para FP3)
   const domP = {};
   MATCHES.filter(m=>m.phase==='group').forEach(m=>{
@@ -2904,7 +2945,41 @@ function renderMatches() {
   buildResolvedTeams(userP);
   const groups = {};
   MATCHES.forEach(m=>{ if(!groups[m.group]) groups[m.group]=[]; groups[m.group].push(m); });
-  let html = locked ? `<div style="background:rgba(244,67,54,0.1);border:1px solid rgba(244,67,54,0.3);border-radius:var(--radius);padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:10px;"><span style="font-size:20px;">🔒</span><div><p style="font-size:13px;font-weight:600;color:var(--red);">Palpites encerrados</p><p style="font-size:12px;color:var(--gray);margin-top:2px;">Prazo encerrado em 10/06 às 23h59.</p></div></div>` : '';
+  // ── Score summary cards ─────────────────────────────────────────
+  let summaryHtml = '';
+  if (state.user && locked) {
+    buildResolvedTeams(userP, null, false);
+    const {pts: totalPts} = calcPts(userP);
+    const bonusPts = calcBonusPts(userP);
+    const qa = userP._qa || {};
+    let extraPts = 0;
+    Object.keys(qa).forEach(qid => { if (qa[qid]?.correct === true) extraPts += 3; });
+    const scorePts = totalPts - bonusPts - extraPts;
+    summaryHtml = `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;">
+      <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px 8px;text-align:center;">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:900;color:var(--gold);">${totalPts}</div>
+        <div style="font-size:10px;color:var(--gray);margin-top:2px;">Total</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px 8px;text-align:center;">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:900;color:#f5a623;">${scorePts}</div>
+        <div style="font-size:10px;color:var(--gray);margin-top:2px;">Placares</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px 8px;text-align:center;">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:900;color:#7eb8f5;">${bonusPts}</div>
+        <div style="font-size:10px;color:var(--gray);margin-top:2px;">Bônus</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px 8px;text-align:center;">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:900;color:var(--green);">${extraPts}</div>
+        <div style="font-size:10px;color:var(--gray);margin-top:2px;">Extras</div>
+      </div>
+    </div>`;
+    buildResolvedTeams(userP);
+  }
+
+  let html = summaryHtml + (locked ? (isSubmitted()
+    ? `<div style="background:rgba(0,200,83,0.08);border:1px solid rgba(0,200,83,0.3);border-radius:var(--radius);padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:10px;"><span style="font-size:20px;">✅</span><div><p style="font-size:13px;font-weight:600;color:var(--green);">Palpites enviados à Comissão</p><p style="font-size:12px;color:var(--gray);margin-top:2px;">Seus palpites foram enviados. Apenas visualização disponível.</p></div></div>`
+    : `<div style="background:rgba(244,67,54,0.1);border:1px solid rgba(244,67,54,0.3);border-radius:var(--radius);padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:10px;"><span style="font-size:20px;">🔒</span><div><p style="font-size:13px;font-weight:600;color:var(--red);">Palpites encerrados</p><p style="font-size:12px;color:var(--gray);margin-top:2px;">Prazo encerrado em 10/06 às 23h59.</p></div></div>`)
+    : '');
 
   Object.keys(groups).forEach(g=>{
     html += `<div class="card"><div class="card-header"><span class="group-label">${g.length<=1?'Grupo ':''}${g}</span></div><div class="card-body">`;
@@ -3212,7 +3287,11 @@ function renderMatches() {
 
   const btnWrap = document.getElementById('save-btn-wrap');
   if (locked) {
-    btnWrap.innerHTML = '<button class="btn-primary" disabled>🔒 PALPITES ENCERRADOS</button>';
+    if (isSubmitted()) {
+      btnWrap.innerHTML = '<button class="btn-primary" disabled style="background:rgba(0,200,83,0.15);color:var(--green);border:1px solid rgba(0,200,83,0.4);">✅ PALPITES ENVIADOS À COMISSÃO</button>';
+    } else {
+      btnWrap.innerHTML = '<button class="btn-primary" disabled>🔒 PALPITES ENCERRADOS</button>';
+    }
   } else {
     btnWrap.innerHTML = `
       <button class="btn-primary" onclick="saveDraft()" style="background:var(--navy3);color:var(--light);border:1px solid rgba(255,255,255,0.2);margin-bottom:10px;">
@@ -3243,24 +3322,84 @@ function renderMatches() {
 // ═══════════════════════════════════════════════════════════════════
 async function syncDraft() {
   if (!state.user) { openModal('login'); return; }
-  if (isPastDeadline()) { showToast('Prazo encerrado!', true); return; }
-  // Read all current input values from DOM
+  if (isLocked()) { showToast(isSubmitted()?'Palpites já enviados à Comissão!':'Prazo encerrado!', true); return; }
+
+  // Verificar pênaltis pendentes em jogos de mata-mata empatados
+  {
+    const pal = state.palpites[state.user] || {};
+    const missingPen = [];
+    MATCHES.filter(m => m.phase === 'knockout').forEach(m => {
+      const p = pal[m.id];
+      if (!p || p.h === undefined || p.a === undefined) return;
+      if (+p.h === +p.a && !p.pen) {
+        const hEl = document.getElementById('p_' + m.id + '_h');
+        const aEl = document.getElementById('p_' + m.id + '_a');
+        const hv = hEl ? hEl.value : String(p.h);
+        const av = aEl ? aEl.value : String(p.a);
+        if (+hv === +av) missingPen.push(m.home + ' × ' + m.away);
+      }
+    });
+    if (missingPen.length > 0) {
+      showToast('⚠️ Falta selecionar o vencedor nos pênaltis em ' + missingPen.length + ' jogo(s) empatado(s) no mata-mata. Corrija antes de enviar.', true);
+      return;
+    }
+  }
+
+  // Carregar pen de todas as fontes locais disponíveis
+  let localDraft = {};
+  try { localDraft = JSON.parse(localStorage.getItem('bolao_draft_' + state.user) || '{}'); } catch(e) {}
+  let backupDraft = {};
+  try {
+    const bk = JSON.parse(localStorage.getItem('bolao_backup') || '{}');
+    backupDraft = (bk.palpites && bk.palpites[state.user]) || {};
+  } catch(e) {}
+
+  // Começar com palpites já salvos (para não perder jogos fora do DOM)
   const temp = {};
-  MATCHES.forEach(m => {
-    const h = document.getElementById('p_'+m.id+'_h')?.value;
-    const a = document.getElementById('p_'+m.id+'_a')?.value;
-    if (h !== '' && a !== '') {
-      temp[m.id] = {h:+h, a:+a};
-      // Preserve penalty if set
-      const existing = state.palpites[state.user]?.[m.id];
-      if (existing?.pen && +h === +a) temp[m.id].pen = existing.pen;
+  const existing = state.palpites[state.user] || {};
+  Object.keys(existing).forEach(k => {
+    if (k.startsWith('_')) return;
+    if (existing[k] && existing[k].h !== undefined && existing[k].a !== undefined) {
+      temp[k] = Object.assign({}, existing[k]);
+      // Garantir pen de todas as fontes
+      if (!temp[k].pen) {
+        const pen = localDraft[k] && localDraft[k].pen || backupDraft[k] && backupDraft[k].pen || null;
+        if (pen && temp[k].h === temp[k].a) temp[k].pen = pen;
+      }
     }
   });
-  // Substituir completamente — não merge — para respeitar apagamentos
+
+  // Sobrescrever com valores atuais do DOM (apenas se o input existe e tem valor)
+  MATCHES.forEach(m => {
+    const ih = document.getElementById('p_'+m.id+'_h');
+    const ia = document.getElementById('p_'+m.id+'_a');
+    if (!ih || !ia) return;
+    const h = ih.value, a = ia.value;
+    if (h !== '' && a !== '') {
+      const pen = existing[m.id] && existing[m.id].pen ||
+                  localDraft[m.id] && localDraft[m.id].pen ||
+                  backupDraft[m.id] && backupDraft[m.id].pen || null;
+      temp[m.id] = {h:+h, a:+a};
+      if (pen && +h === +a) temp[m.id].pen = pen;
+    } else if (h === '' && a === '' && !existing[m.id]) {
+      delete temp[m.id];
+    }
+  });
+  // Atualizar state com os palpites consolidados
   if (!state.palpites[state.user]) state.palpites[state.user] = {};
-  const preserved2 = { _savedAt: state.palpites[state.user]._savedAt, _qa: state.palpites[state.user]._qa, _fp: state.palpites[state.user]._fp, _fp3: state.palpites[state.user]._fp3 };
-  Object.keys(state.palpites[state.user]).forEach(k => { delete state.palpites[state.user][k]; });
-  Object.assign(state.palpites[state.user], preserved2, temp);
+  // Preservar metadados ANTES de qualquer modificação
+  const preserved2 = {
+    _savedAt: state.palpites[state.user]._savedAt,
+    _qa: state.palpites[state.user]._qa,
+    _fp: state.palpites[state.user]._fp,
+    _fp3: state.palpites[state.user]._fp3
+  };
+  // Aplicar temp sobre o state existente (não apagar tudo)
+  Object.assign(state.palpites[state.user], temp);
+  // Restaurar metadados — garantir que _qa não foi perdido
+  if (preserved2._qa) state.palpites[state.user]._qa = preserved2._qa;
+  if (preserved2._fp) state.palpites[state.user]._fp = preserved2._fp;
+  if (preserved2._fp3) state.palpites[state.user]._fp3 = preserved2._fp3;
   // Save local draft too
   localStorage.setItem('bolao_draft_' + state.user, JSON.stringify(state.palpites[state.user]));
   localStorage.setItem('bolao_draft_time_' + state.user, new Date().toISOString());
@@ -3268,8 +3407,11 @@ async function syncDraft() {
   try {
     showToast('Sincronizando...');
     await saveGlobal();
-    const count = Object.keys(temp).length;
-    showToast('✓ ' + count + ' palpites sincronizados! Acesse de qualquer dispositivo.');
+    // Marcar como enviado — bloqueia edição
+    state.palpites[state.user]._submitted = true;
+    await saveGlobal();
+    const count = Object.keys(temp).filter(k => !k.startsWith('_')).length;
+    showToast('✅ ' + count + ' palpites enviados à Comissão!');
     renderMatches();
   } catch(e) {
     showToast('Erro ao sincronizar. Verifique sua conexão.', true);
@@ -3278,7 +3420,7 @@ async function syncDraft() {
 
 function clearPalpites() {
   if (!state.user) { openModal('login'); return; }
-  if (isPastDeadline()) { showToast('Prazo encerrado!', true); return; }
+  if (isLocked()) { showToast(isSubmitted()?'Palpites já enviados!':'Prazo encerrado!', true); return; }
   if (!confirm('Tem certeza que deseja apagar TODOS os seus palpites? Esta ação não pode ser desfeita.')) return;
   // Clear all match palpites but keep extras (_qa)
   var qa = state.palpites[state.user] && state.palpites[state.user]._qa;
@@ -3294,21 +3436,39 @@ function clearPalpites() {
 
 async function saveDraft() {
   if (!state.user) { openModal('login'); return; }
-  if (isPastDeadline()) { showToast('Prazo encerrado!', true); return; }
+  if (isLocked()) { showToast(isSubmitted()?'Palpites já enviados!':'Prazo encerrado!', true); return; }
+
+  // Começar com TUDO que está no state (inclui jogos fora do DOM)
+  const existing = state.palpites[state.user] || {};
   const draft = {};
   MATCHES.forEach(m => {
-    const h = document.getElementById('p_'+m.id+'_h')?.value;
-    const a = document.getElementById('p_'+m.id+'_a')?.value;
-    if (h !== '' && a !== '') {
-      draft[m.id] = {h:+h, a:+a};
-      // Preserve penalty if set
-      const existing = state.palpites[state.user]?.[m.id];
-      if (existing?.pen && +h===+a) draft[m.id].pen = existing.pen;
+    const sp = existing[m.id];
+    if (sp && sp.h !== undefined && sp.a !== undefined) {
+      draft[m.id] = Object.assign({}, sp); // copia incluindo pen
     }
   });
-  // Preserve extras (_qa) and fair play (_fp)
-  if (state.palpites[state.user]?._qa) draft._qa = state.palpites[state.user]._qa;
-  if (state.palpites[state.user]?._fp) draft._fp = state.palpites[state.user]._fp;
+
+  // Sobrescrever com valores atuais do DOM (apenas se o input existe e tem valor)
+  MATCHES.forEach(m => {
+    const ih = document.getElementById('p_'+m.id+'_h');
+    const ia = document.getElementById('p_'+m.id+'_a');
+    if (!ih || !ia) return;
+    const h = ih.value, a = ia.value;
+    if (h !== '' && a !== '') {
+      const pen = draft[m.id]?.pen || null;
+      draft[m.id] = {h:+h, a:+a};
+      if (pen && +h===+a) draft[m.id].pen = pen;
+    } else if (h === '' && a === '' && !existing[m.id]) {
+      delete draft[m.id];
+    }
+    // Se input vazio mas havia valor salvo no state — manter o valor salvo (não apagar)
+  });
+  // Preserve metadados
+  const existingMeta = state.palpites[state.user] || {};
+  if (existingMeta._qa) draft._qa = existingMeta._qa;
+  if (existingMeta._fp) draft._fp = existingMeta._fp;
+  if (existingMeta._fp3) draft._fp3 = existingMeta._fp3;
+  if (existingMeta._submitted) draft._submitted = existingMeta._submitted;
 
   // Update state
   if (!state.palpites[state.user]) state.palpites[state.user] = {};
@@ -3332,7 +3492,7 @@ async function saveDraft() {
       return true;
     }).length;
     showToast(`💾 Rascunho salvo! ${count} de ${MATCHES.length} jogos preenchidos.`);
-    // Mostrar banner do campeão se todos os 104 palpites estiverem completos
+    // Mostrar banner do campeão se todos os palpites estiverem completos
     if (count === MATCHES.length) {
       var champ2 = getChampionFromPalpites(state.palpites[state.user]);
       var champName2 = champ2 ? champ2.name : '';
@@ -3364,52 +3524,151 @@ async function saveDraft() {
 function loadDraft() {
   if (!state.user) return;
   const draft = localStorage.getItem('bolao_draft_' + state.user);
-  const draftTime = localStorage.getItem('bolao_draft_time_' + state.user);
-  if (!draft || !draftTime) return;
+  // Se não há draft específico, tentar recuperar pen do backup global
+  const backupStr = localStorage.getItem('bolao_backup');
   try {
-    const data = JSON.parse(draft);
     if (!state.palpites[state.user]) state.palpites[state.user] = {};
-    // Comparar timestamp do localStorage com o do Firebase
-    const fbTime = state.palpites[state.user]._savedAt || null;
-    const localIsNewer = !fbTime || new Date(draftTime) >= new Date(fbTime);
-    if (localIsNewer) {
-      // Substituição completa — não merge — para respeitar apagamentos
-      // Preservar _savedAt do Firebase para manter referência de tempo
-      const fbSavedAt = state.palpites[state.user]._savedAt;
-      Object.keys(state.palpites[state.user]).forEach(k => {
-        delete state.palpites[state.user][k];
-      });
-      Object.assign(state.palpites[state.user], data);
-      // Manter _savedAt do Firebase para evitar re-aplicação do draft antigo
-      if (fbSavedAt) state.palpites[state.user]._savedAt = fbSavedAt;
-      // Sincronizar Firebase com os dados do localStorage (apagamentos incluídos)
-      saveGlobal().catch(function(){});
-    } else {
-      // Firebase é mais recente — descartar rascunho local desatualizado
-      localStorage.removeItem('bolao_draft_' + state.user);
-      localStorage.removeItem('bolao_draft_time_' + state.user);
+    const fb = state.palpites[state.user];
+
+    // Recuperar pen do backup global se Firebase não tem
+    if (backupStr) {
+      try {
+        const backup = JSON.parse(backupStr);
+        const backupP = backup.palpites && backup.palpites[state.user];
+        if (backupP) {
+          MATCHES.filter(m => m.phase === 'knockout').forEach(function(m) {
+            const bp = backupP[m.id];
+            const fp = fb[m.id];
+            if (bp && bp.pen && fp && !fp.pen) {
+              fb[m.id] = Object.assign({}, fp, {pen: bp.pen});
+            }
+          });
+        }
+      } catch(e2) {}
     }
+
+    if (!draft) return;
+    const local = JSON.parse(draft);
+    let changed = false;
+
+    // Merge por jogo: para cada jogo no localStorage,
+    // sempre aplicar pen se localStorage tem e Firebase não tem
+    MATCHES.forEach(function(m) {
+      const lp = local[m.id];
+      const fp = fb[m.id];
+      if (!lp || lp.h === undefined || lp.a === undefined) return;
+      if (!fp || fp.h === undefined || fp.a === undefined) {
+        // Firebase não tem esse jogo — adicionar do localStorage
+        fb[m.id] = Object.assign({}, lp);
+        changed = true;
+      } else {
+        // Ambos têm — sempre aplicar pen do localStorage se Firebase não tem
+        if (lp.pen && !fp.pen) {
+          fb[m.id] = Object.assign({}, fp, {pen: lp.pen});
+          changed = true;
+        }
+      }
+    });
+
+    // Metadados: _fp, _fp3, _qa do localStorage se Firebase não tem
+    ['_fp', '_fp3', '_qa'].forEach(function(k) {
+      if (local[k] && !fb[k]) { fb[k] = local[k]; changed = true; }
+    });
+    // Nunca remover _submitted do Firebase via localStorage
+    // (só o admin pode modificar _submitted)
+
+    if (changed) {
+      // Antes de salvar, garantir que _submitted não foi perdido
+      saveGlobal().catch(function(){});
+    }
+    // Limpar localStorage após merge
+    localStorage.removeItem('bolao_draft_' + state.user);
+    localStorage.removeItem('bolao_draft_time_' + state.user);
   } catch(e) {}
 }
 
 async function savePalpites() {
   if (!state.user) { openModal('login'); return; }
   if (isPastDeadline()) { showToast('Prazo encerrado!', true); return; }
+  if (isSubmitted()) { showToast('Palpites já enviados à Comissão!', true); return; }
+  // Verificar pagamento  const userObj = state.users[state.user];
+  if (userObj && userObj.paid === false) {
+    showToast('⚠️ Seus palpites não podem ser enviados pois sua inscrição ainda não foi paga. Entre em contato com a comissão.', true);
+    return;
+  }
+
+  // Verificar pênaltis pendentes em jogos de mata-mata empatados
+  {
+    const pal = state.palpites[state.user] || {};
+    const missingPen = [];
+    MATCHES.filter(m => m.phase === 'knockout').forEach(m => {
+      const p = pal[m.id];
+      if (!p || p.h === undefined || p.a === undefined) return;
+      if (+p.h === +p.a && !p.pen) {
+        const hEl = document.getElementById('p_' + m.id + '_h');
+        const aEl = document.getElementById('p_' + m.id + '_a');
+        const hv = hEl ? hEl.value : String(p.h);
+        const av = aEl ? aEl.value : String(p.a);
+        if (+hv === +av) missingPen.push(m.home + ' × ' + m.away);
+      }
+    });
+    if (missingPen.length > 0) {
+      showToast('⚠️ Falta selecionar o vencedor nos pênaltis em ' + missingPen.length + ' jogo(s) empatado(s) no mata-mata. Corrija antes de enviar.', true);
+      return;
+    }
+  }
+
+  // Carregar pen de todas as fontes locais disponíveis
+  let localDraft = {};
+  try { localDraft = JSON.parse(localStorage.getItem('bolao_draft_' + state.user) || '{}'); } catch(e) {}
+  let backupDraft = {};
+  try {
+    const bk = JSON.parse(localStorage.getItem('bolao_backup') || '{}');
+    backupDraft = (bk.palpites && bk.palpites[state.user]) || {};
+  } catch(e) {}
+
+  // Construir temp a partir do state + DOM
+  const existing = state.palpites[state.user] || {};
   const temp = {};
-  MATCHES.forEach(m=>{
-    const h=document.getElementById('p_'+m.id+'_h')?.value;
-    const a=document.getElementById('p_'+m.id+'_a')?.value;
-    if(h!==''&&a!=='') temp[m.id]={h:+h,a:+a};
+
+  // Base: palpites salvos no state (preserva pen)
+  Object.keys(existing).forEach(k => {
+    if (k.startsWith('_')) return;
+    if (existing[k] && existing[k].h !== undefined && existing[k].a !== undefined) {
+      temp[k] = Object.assign({}, existing[k]);
+      // Garantir pen de todas as fontes
+      if (!temp[k].pen) {
+        const pen = (localDraft[k] && localDraft[k].pen) || (backupDraft[k] && backupDraft[k].pen) || null;
+        if (pen && temp[k].h === temp[k].a) temp[k].pen = pen;
+      }
+    }
   });
-  const missingM = MATCHES.filter(m=>!temp[m.id]);
-  const savedQA = state.palpites[state.user]?._qa||{};
-  const missingE = EXTRA_QS.filter(q=>!savedQA[q.id]?.answer?.trim());
-  if (missingM.length||missingE.length) {
+
+  // Override com DOM (apenas se input existe e tem valor)
+  MATCHES.forEach(m => {
+    const ih = document.getElementById('p_'+m.id+'_h');
+    const ia = document.getElementById('p_'+m.id+'_a');
+    if (!ih || !ia) return;
+    const h = ih.value, a = ia.value;
+    if (h !== '' && a !== '') {
+      const pen = (existing[m.id] && existing[m.id].pen) ||
+                  (localDraft[m.id] && localDraft[m.id].pen) ||
+                  (backupDraft[m.id] && backupDraft[m.id].pen) || null;
+      temp[m.id] = {h:+h, a:+a};
+      if (pen && +h === +a) temp[m.id].pen = pen;
+    }
+  });
+
+  // Verificar jogos faltando
+  const missingM = MATCHES.filter(m => !temp[m.id]);
+  const savedQA = existing._qa || {};
+  const missingE = EXTRA_QS.filter(q => !savedQA[q.id]?.answer?.trim());
+  if (missingM.length || missingE.length) {
     const alertEl = document.getElementById('missing-alert');
     let html = '<span style="font-size:20px;flex-shrink:0;">⚠️</span><div style="flex:1;">';
     if (missingM.length) {
       const byG = {};
-      missingM.forEach(m=>{ const k=m.phase==='group'?'Grupo '+m.group:m.group; byG[k]=(byG[k]||0)+1; });
+      missingM.forEach(m => { const k = m.phase==='group'?'Grupo '+m.group:m.group; byG[k]=(byG[k]||0)+1; });
       html += `<p style="font-size:13px;font-weight:600;color:#f5a623;margin-bottom:2px;">⚽ Faltam ${missingM.length} jogo${missingM.length>1?'s':''}</p>`;
       html += `<p style="font-size:12px;color:var(--gray);margin-bottom:${missingE.length?'8px':'0'};">${Object.entries(byG).map(([g,n])=>`${g}: ${n}`).join(' · ')}</p>`;
     }
@@ -3421,18 +3680,39 @@ async function savePalpites() {
     html += '</div>';
     alertEl.style.display='flex'; alertEl.innerHTML=html;
     alertEl.scrollIntoView({behavior:'smooth',block:'center'});
-    showToast('Preencha tudo antes de salvar!', true);
+    showToast('Preencha tudo antes de enviar!', true);
     return;
   }
-  if (!state.palpites[state.user]) state.palpites[state.user]={};
+
+  // Aplicar temp no state preservando metadados
+  if (!state.palpites[state.user]) state.palpites[state.user] = {};
+  const meta = {
+    _qa: existing._qa,
+    _fp: existing._fp,
+    _fp3: existing._fp3,
+  };
   Object.assign(state.palpites[state.user], temp);
+  if (meta._qa) state.palpites[state.user]._qa = meta._qa;
+  if (meta._fp) state.palpites[state.user]._fp = meta._fp;
+  if (meta._fp3) state.palpites[state.user]._fp3 = meta._fp3;
+
   document.getElementById('missing-alert').style.display='none';
-  // Clear local draft after successful submission
-  localStorage.removeItem('bolao_draft_' + state.user);
-  localStorage.removeItem('bolao_draft_time_' + state.user);
-  await saveGlobal();
-  showToast('Palpites enviados à Comissão! ✓');
-  renderRanking();
+  try {
+    showToast('Sincronizando...');
+    await saveGlobal();
+    // Marcar como enviado
+    state.palpites[state.user]._submitted = true;
+    await saveGlobal();
+    // Limpar localStorage após envio bem sucedido
+    localStorage.removeItem('bolao_draft_' + state.user);
+    localStorage.removeItem('bolao_draft_time_' + state.user);
+    const count = Object.keys(temp).filter(k => !k.startsWith('_')).length;
+    showToast('✅ ' + count + ' palpites enviados à Comissão!');
+    renderMatches();
+    renderRanking();
+  } catch(e) {
+    showToast('Erro ao enviar. Verifique sua conexão.', true);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3440,24 +3720,37 @@ async function savePalpites() {
 // ═══════════════════════════════════════════════════════════════════
 function renderRanking() {
   takeSnapshot();
-  const names = Object.keys(state.users).filter(u => !state.users[u]._deleted);
-  const scores = names.map(u=>({u,...calcPts(state.palpites[u])})).sort((a,b)=>b.pts-a.pts);
+  const names = Object.keys(state.users).filter(u => {
+    const usr = state.users[u];
+    return !usr._deleted && usr.status !== 'pending' && usr.status !== 'rejected';
+  });
+  const scores = names.map(u=>{
+    buildResolvedTeams(state.palpites[u] || {}, null, false);
+    return {u,...calcPts(state.palpites[u])};
+  }).sort((a,b)=>b.pts-a.pts);
+  // Restaurar resolvedTeams para o usuário atual
+  buildResolvedTeams(state.palpites[state.user] || {});
   const done = MATCHES.filter(m=>state.results[m.id]).length;
+  const qaAnswers = state.results._qaAnswers || {};
+  const extrasCorrigidas = EXTRA_QS.filter(q => qaAnswers[q.id] && qaAnswers[q.id].correct).length;
+  const extrasTotal = EXTRA_QS.length;
   document.getElementById('metrics').innerHTML = `
     <div class="metric"><div class="metric-val">${names.length}</div><div class="metric-label">Participantes</div></div>
     <div class="metric"><div class="metric-val">${done}</div><div class="metric-label">Encerrados</div></div>
-    <div class="metric"><div class="metric-val">${scores[0]?.pts||0}</div><div class="metric-label">Líder (pts)</div></div>`;
+    <div class="metric"><div class="metric-val">${scores[0]?.pts||0}</div><div class="metric-label">Líder (pts)</div></div>
+    <div class="metric"><div class="metric-val" style="color:${extrasCorrigidas===extrasTotal?'var(--green)':'var(--gold)'};">${extrasCorrigidas}<span style="font-size:14px;font-weight:500;color:var(--gray);">/${extrasTotal}</span></div><div class="metric-label">Extras corrigidas</div></div>`;
   if (!scores.length) { document.getElementById('ranking-list').innerHTML='<div class="empty"><div class="empty-icon">🏆</div><p>Nenhum participante ainda</p></div>'; return; }
   const canView = isPastDeadline();
   document.getElementById('ranking-list').innerHTML = scores.map((s,i)=>{
     const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':`#${i+1}`;
     const cls=i===0?'color:#FFD700':i===1?'color:#C0C0C0':i===2?'color:#CD7F32':'color:var(--gray)';
-    const clickable = canView ? `onclick="viewPalpites('${s.u}')" style="cursor:pointer;"` : '';
-    const hint = canView ? '<span style="font-size:10px;color:var(--gold);margin-left:4px;">ver palpites</span>' : '';
+    const clickable = canView ? `onclick="openScoreModal('${s.u}')" style="cursor:pointer;"` : '';
+    const hint = canView ? '<span style="font-size:10px;color:var(--gold);margin-left:4px;">▸ detalhes</span>' : '';
+    buildResolvedTeams(state.palpites[s.u] || {}, null, false);
     const maxP = calcMaxPts(state.palpites[s.u]);
     return `<div class="rank-row" ${clickable}>
       <span class="rank-num" style="${cls}">${medal}</span>
-      <div class="avatar" style="background:${uColor(s.u)};color:${uColorT(s.u)};">${initials(uName(s.u))}</div>
+      ${avatarHtml(state.users[s.u], s.u)}
       <div style="flex:1;">
         <div class="rank-name">${uName(s.u)}${hint}</div>
         <div class="rank-sub">${s.ac} acertos · ${s.ex} exatos</div>
@@ -3475,34 +3768,224 @@ function rankTab(tab, btn) {
   if (tab==='evolucao') renderEvolucao();
 }
 function renderEvolucao() {
-  const snaps=state.snapshots, canvas=document.getElementById('evo-chart');
+  const canvas=document.getElementById('evo-chart');
   const legend=document.getElementById('evo-legend'), table=document.getElementById('evo-table');
   if (!canvas) return;
-  if (snaps.length<2) { canvas.style.display='none'; legend.innerHTML=''; table.innerHTML='<div class="empty"><div class="empty-icon">📈</div><p>Disponível após 2 dias de resultados.</p></div>'; return; }
+
+  // Datas reais dos jogos com resultados
+  const monthMap = {'Jan':1,'Feb':2,'Mar':3,'Apr':4,'May':5,'Jun':6,'Jul':7,'Aug':8,'Sep':9,'Oct':10,'Nov':11,'Dec':12};
+  function matchDateKey(dateStr) {
+    const m = dateStr.match(/(\d+)\s+(\w+)/);
+    if (!m) return '';
+    return '2026-' + String(monthMap[m[2]]||0).padStart(2,'0') + '-' + m[1].padStart(2,'0');
+  }
+  function matchDateKey2(dateStr) {
+    const m2 = dateStr.match(/(\d+)\s+(\w+)/);
+    if (!m2) return '';
+    const day2 = m2[1].padStart(2,'0');
+    const mon2 = String(monthMap[m2[2]] || 0).padStart(2,'0');
+    return '2026-' + mon2 + '-' + day2;
+  }
+
+  const daysWithResults = [...new Set(
+    MATCHES.filter(m => state.results[m.id]).map(m => matchDateKey2(m.date))
+  )].sort();
+
+  const users = Object.keys(state.users).filter(w => {
+    const u = state.users[w];
+    return u && !u._deleted && u.status !== 'pending' && u.status !== 'rejected';
+  });
+
+  if (!daysWithResults.length) {
+    canvas.style.display='none'; legend.innerHTML='';
+    table.innerHTML='<div class="empty"><div class="empty-icon">📈</div><p>Disponível após o primeiro dia de resultados.</p></div>';
+    return;
+  }
   canvas.style.display='block';
-  const users=Object.keys(state.users);
-  const dates=snaps.map(s=>{ const[,m,d]=s.date.split('-'); return d+'/'+m; });
-  const series=users.map(w=>({w,name:uName(w),color:uColor(w),data:snaps.map(s=>s.scores[w]||0)}));
-  const W=canvas.offsetWidth||320, H=240;
-  canvas.width=W*window.devicePixelRatio; canvas.height=H*window.devicePixelRatio;
-  canvas.style.height=H+'px';
-  const ctx=canvas.getContext('2d'); ctx.scale(window.devicePixelRatio,window.devicePixelRatio);
-  const P={t:16,r:20,b:36,l:40}, cW=W-P.l-P.r, cH=H-P.t-P.b;
-  const maxP=Math.max(...series.flatMap(s=>s.data),10);
-  const xOf=i=>P.l+(snaps.length<=1?cW/2:i/(snaps.length-1)*cW);
-  const yOf=v=>P.t+cH-(v/maxP*cH);
-  ctx.strokeStyle='rgba(255,255,255,0.06)'; ctx.lineWidth=1;
-  [0,.25,.5,.75,1].forEach(f=>{ const y=P.t+cH*(1-f); ctx.beginPath(); ctx.moveTo(P.l,y); ctx.lineTo(P.l+cW,y); ctx.stroke(); ctx.fillStyle='rgba(255,255,255,0.3)'; ctx.font='10px Barlow,sans-serif'; ctx.textAlign='right'; ctx.fillText(Math.round(maxP*f),P.l-6,y+4); });
-  ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.font='10px Barlow,sans-serif'; ctx.textAlign='center';
-  const step=Math.max(1,Math.ceil(dates.length/8));
-  dates.forEach((d,i)=>{ if(i%step===0||i===dates.length-1) ctx.fillText(d,xOf(i),H-P.b+14); });
-  series.forEach(s=>{ ctx.beginPath(); ctx.strokeStyle=s.color; ctx.lineWidth=2.5; ctx.lineJoin='round'; s.data.forEach((v,i)=>{ const x=xOf(i),y=yOf(v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); }); ctx.stroke(); const lx=xOf(s.data.length-1),ly=yOf(s.data[s.data.length-1]); ctx.beginPath(); ctx.arc(lx,ly,4,0,Math.PI*2); ctx.fillStyle=s.color; ctx.fill(); });
-  legend.innerHTML=series.slice().sort((a,b)=>b.data[b.data.length-1]-a.data[a.data.length-1]).map(s=>`<span style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--light);"><span style="width:12px;height:12px;border-radius:50%;background:${s.color};flex-shrink:0;"></span>${s.name.split(' ')[0]}</span>`).join('');
-  let th='<tr><th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--gray);">Participante</th>';
-  snaps.forEach(s=>{ const[,m,d]=s.date.split('-'); th+=`<th style="padding:6px 4px;font-size:11px;color:var(--gray);text-align:center;">${d}/${m}</th>`; });
-  th+='</tr>';
-  const rows=users.map(w=>{ let tr=`<tr><td style="padding:6px 8px;font-size:13px;font-weight:500;white-space:nowrap;">${uName(w).split(' ')[0]}</td>`; snaps.forEach(s=>{ tr+=`<td style="padding:6px 4px;font-size:13px;text-align:center;color:var(--gold);font-weight:600;">${s.scores[w]||0}</td>`; }); return tr+'</tr>'; });
-  table.innerHTML=`<p style="font-size:11px;color:var(--gray);margin-bottom:8px;letter-spacing:1px;font-weight:600;">PONTUAÇÃO POR DIA</p><div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">${th}${rows.join('')}</table></div>`;
+
+  // Calcular pontos por jogo para cada usuário
+  function ptsForMatch(uid, m) {
+    const res = state.results[m.id];
+    const p = state.palpites[uid]?.[m.id];
+    if (!res || !p || p.h === undefined || p.a === undefined) return 0;
+    const rW = res.h > res.a ? 'H' : res.h < res.a ? 'A' : 'E';
+    const pW = +p.h > +p.a ? 'H' : +p.h < +p.a ? 'A' : 'E';
+    if (+p.h === +res.h && +p.a === +res.a) return 5;
+    if (rW === pW) return 3;
+    return 0;
+  }
+
+  // Pontos por dia e acumulados para cada usuário
+  const ptsByDay = {};
+  users.forEach(uid => {
+    ptsByDay[uid] = {};
+    daysWithResults.forEach(dk => { ptsByDay[uid][dk] = 0; });
+    MATCHES.filter(m => state.results[m.id]).forEach(m => {
+      const dk = matchDateKey(m.date);
+      if (ptsByDay[uid][dk] !== undefined) ptsByDay[uid][dk] += ptsForMatch(uid, m);
+    });
+  });
+
+  // Pontos de bônus por classificação para cada usuário
+  function getBonusPts(uid) {
+    const p = state.palpites[uid] || {};
+    buildResolvedTeams(p);
+    const b = calcBonusPts(p);
+    buildResolvedTeams(state.palpites[state.user] || {});
+    return b;
+  }
+
+  // Pontos extras confirmados pelo admin para cada usuário
+  function getExtrasPts(uid) {
+    const qa = state.palpites[uid]?._qa || {};
+    return EXTRA_QS.reduce((sum, q) => sum + (qa[q.id]?.correct === true ? 3 : 0), 0);
+  }
+
+  // Séries acumuladas para o gráfico (jogos + bônus + extras)
+  const series = users.map(uid => {
+    let acc = 0;
+    const data = daysWithResults.map(dk => {
+      acc += ptsByDay[uid][dk];
+      return acc;
+    });
+    const bonus = getBonusPts(uid);
+    const extras = getExtrasPts(uid);
+    const dataFinal = data.map(v => v + bonus + extras);
+    return {uid, name: uName(uid), color: uColor(uid), data: dataFinal, bonus, extras};
+  });
+
+  // Eixo X fixo: 11/06 a 19/07 (39 dias)
+  const START = new Date('2026-06-11');
+  const END   = new Date('2026-07-19');
+  const totalDays = Math.round((END - START) / 86400000) + 1;
+  const today = new Date();
+  const lastDay = Math.min(Math.round((today - START) / 86400000), totalDays - 1);
+
+  // Mapear datas reais para posição no eixo X
+  function dayIdx(iso) {
+    const d = new Date(iso);
+    return Math.round((d - START) / 86400000);
+  }
+
+  // Desenhar gráfico
+  const W = canvas.offsetWidth || 320, H = 260;
+  canvas.width  = W * window.devicePixelRatio;
+  canvas.height = H * window.devicePixelRatio;
+  canvas.style.height = H + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+  const P = {t:16, r:24, b:40, l:44};
+  const cW = W - P.l - P.r, cH = H - P.t - P.b;
+  const maxPts = Math.max(...series.flatMap(s => s.data), 50);
+
+  const xOf = i => P.l + (i / (totalDays - 1)) * cW;
+  const yOf = v => P.t + cH - (v / maxPts * cH);
+
+  // Grade horizontal
+  ctx.lineWidth = 1;
+  [0, 0.25, 0.5, 0.75, 1].forEach(f => {
+    const y = P.t + cH * (1 - f);
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.beginPath(); ctx.moveTo(P.l, y); ctx.lineTo(P.l + cW, y); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '10px Barlow,sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(Math.round(maxPts * f), P.l - 6, y + 4);
+  });
+
+  // Linha "hoje"
+  if (lastDay >= 0 && lastDay < totalDays) {
+    ctx.strokeStyle = 'rgba(245,197,24,0.25)'; ctx.lineWidth = 1; ctx.setLineDash([4,3]);
+    ctx.beginPath(); ctx.moveTo(xOf(lastDay), P.t); ctx.lineTo(xOf(lastDay), P.t + cH); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(245,197,24,0.7)'; ctx.font = '9px Barlow,sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('hoje', xOf(lastDay), P.t - 4);
+  }
+
+  // Labels eixo X a cada 7 dias
+  const allLabels = [];
+  for (let i = 0; i < totalDays; i++) {
+    const d = new Date(START); d.setDate(START.getDate() + i);
+    allLabels.push(String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0'));
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = '10px Barlow,sans-serif'; ctx.textAlign = 'center';
+  allLabels.forEach((lbl, i) => {
+    if (i === 0 || i === totalDays-1 || i % 7 === 0) {
+      ctx.fillText(lbl, xOf(i), H - P.b + 16);
+      ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(xOf(i), P.t); ctx.lineTo(xOf(i), P.t + cH); ctx.stroke();
+    }
+  });
+
+  // Curvas — usando datas reais dos jogos como pontos
+  series.forEach(s => {
+    ctx.beginPath();
+    ctx.strokeStyle = s.color; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+    daysWithResults.forEach((dk, i) => {
+      const x = xOf(dayIdx(dk)), y = yOf(s.data[i]);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    // Ponto no último dia
+    const lastX = xOf(dayIdx(daysWithResults[daysWithResults.length-1]));
+    const lastY = yOf(s.data[s.data.length-1]);
+    ctx.beginPath(); ctx.arc(lastX, lastY, 4, 0, Math.PI*2);
+    ctx.fillStyle = s.color; ctx.fill();
+  });
+
+  // Legenda ordenada por pontuação atual
+  const lastTotal = uid => series.find(s => s.uid === uid)?.data.slice(-1)[0] || 0;
+  legend.innerHTML = users.slice()
+    .sort((a,b) => lastTotal(b) - lastTotal(a))
+    .map(uid => {
+      const s = series.find(x => x.uid === uid);
+      return `<span style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--light);">
+        <span style="width:12px;height:12px;border-radius:50%;background:${s.color};flex-shrink:0;"></span>
+        ${s.name.split(' ')[0]} <span style="color:var(--gold);font-weight:700;">${s.data.slice(-1)[0]}pts</span>
+      </span>`;
+    }).join('');
+
+  // Tabela por data real dos jogos
+  const sortedUsers = users.slice().sort((a,b) => uName(a).localeCompare(uName(b), 'pt-BR', {sensitivity:'base'}));
+
+  sortedUsers.forEach(uid => {
+    if (!ptsByDay[uid]) {
+      ptsByDay[uid] = {};
+      daysWithResults.forEach(dk => { ptsByDay[uid][dk] = 0; });
+      MATCHES.filter(m => state.results[m.id]).forEach(m => {
+        const dk = matchDateKey(m.date);
+        if (ptsByDay[uid][dk] !== undefined) ptsByDay[uid][dk] += ptsForMatch(uid, m);
+      });
+    }
+  });
+
+  // Construir tabela
+  let th = '<tr><th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--gray);position:sticky;left:0;background:var(--navy2);">Participante</th>';
+  daysWithResults.forEach(dk => {
+    const [,m,d] = dk.split('-');
+    th += `<th style="padding:6px 6px;font-size:11px;color:var(--gray);text-align:center;min-width:44px;">${d}/${m}</th>`;
+  });
+  th += '<th style="padding:6px 8px;font-size:11px;color:#7eb8f5;text-align:center;min-width:52px;">Bônus</th>';
+  th += '<th style="padding:6px 8px;font-size:11px;color:var(--green);text-align:center;min-width:52px;">Extras</th>';
+  th += '<th style="padding:6px 8px;font-size:11px;color:var(--gold);text-align:center;">Total</th></tr>';
+
+  const tableRows = sortedUsers.map(uid => {
+    const dayTotal = Object.values(ptsByDay[uid]).reduce((a,b) => a+b, 0);
+    const bonus = getBonusPts(uid);
+    const extras = getExtrasPts(uid);
+    const total = dayTotal + bonus + extras;
+    let tr = `<tr><td style="padding:6px 8px;font-size:13px;font-weight:500;white-space:nowrap;position:sticky;left:0;background:var(--navy2);">${uName(uid)}</td>`;
+    daysWithResults.forEach(dk => {
+      const pts = ptsByDay[uid][dk];
+      tr += `<td style="padding:6px 4px;font-size:13px;text-align:center;color:${pts>0?'var(--gold)':'rgba(255,255,255,0.25)'};font-weight:${pts>0?'700':'400'};">${pts > 0 ? '+'+pts : '—'}</td>`;
+    });
+    tr += `<td style="padding:6px 8px;font-size:13px;text-align:center;color:${bonus>0?'#7eb8f5':'rgba(255,255,255,0.25)'};font-weight:${bonus>0?'700':'400'};">${bonus > 0 ? '+'+bonus : '—'}</td>`;
+    tr += `<td style="padding:6px 8px;font-size:13px;text-align:center;color:${extras>0?'var(--green)':'rgba(255,255,255,0.25)'};font-weight:${extras>0?'700':'400'};">${extras > 0 ? '+'+extras : '—'}</td>`;
+    tr += `<td style="padding:6px 8px;font-size:14px;font-weight:900;text-align:center;color:var(--gold);">${total}</td></tr>`;
+    return tr;
+  });
+
+  table.innerHTML = `<p style="font-size:11px;color:var(--gray);margin-bottom:8px;letter-spacing:1px;font-weight:600;">PONTUAÇÃO POR DIA (data real dos jogos)</p>
+    <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">${th}${tableRows.join('')}</table></div>`;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3541,9 +4024,8 @@ function histTab(tab, btn) {
 // RENDER EXTRAS
 // ═══════════════════════════════════════════════════════════════════
 function renderExtras() {
-  const locked=isPastDeadline();
-  const saved=state.user?(state.palpites[state.user]?._qa||{}):{};
-  const answered=EXTRA_QS.filter(q=>saved[q.id]?.answer?.trim()).length;
+  const locked=isLocked();
+  const saved=state.user?(state.palpites[state.user]?._qa||{}):{};  const answered=EXTRA_QS.filter(q=>saved[q.id]?.answer?.trim()).length;
   document.getElementById('extras-count').textContent=`${answered}/${EXTRA_QS.length}`;
   document.getElementById('extras-count').style.color=answered===EXTRA_QS.length?'var(--green)':'var(--gold)';
   let html='';
@@ -3565,7 +4047,7 @@ function renderExtras() {
 }
 async function saveExtras() {
   if (!state.user) { openModal('login'); return; }
-  if (isPastDeadline()) { showToast('Prazo encerrado!', true); return; }
+  if (isLocked()) { showToast(isSubmitted()?'Palpites já enviados!':'Prazo encerrado!', true); return; }
   if (!state.palpites[state.user]) state.palpites[state.user]={};
   if (!state.palpites[state.user]._qa) state.palpites[state.user]._qa={};
   let count=0, missing=[];
@@ -4119,17 +4601,24 @@ function renderAdminParticipants() {
   // Approved participants
   if (approved.length) {
     html += `<p style="font-size:11px;color:var(--green);font-weight:700;letter-spacing:1px;margin-bottom:8px;">✓ APROVADOS (${approved.length})</p>`;
-    html += approved.map(([uid,u]) => `
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+    html += approved.map(([uid,u]) => {
+      const isSubmittedUser = !!(state.palpites[uid]?._submitted);
+      return `
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05);flex-wrap:wrap;">
         <div class="avatar" style="background:${u.color||COLORS[0]};color:${u.colorT||COLORS_T[0]};">${initials(uApelido(u,uid))}</div>
-        <div style="flex:1;">
-          <p style="font-size:14px;font-weight:500;">${uApelido(u,uid)}</p>
+        <div style="flex:1;min-width:100px;">
+          <p style="font-size:14px;font-weight:500;">${uApelido(u,uid)}${isSubmittedUser?' <span style="font-size:10px;color:var(--green);font-weight:700;">✅ enviado</span>':''}</p>
           <p style="font-size:12px;color:var(--gray);">📱 ${uWpp(u,uid)}</p>
         </div>
         <button onclick="adminViewPalpites('${uid}')" style="padding:5px 10px;background:rgba(126,184,245,0.12);color:#7eb8f5;border:1px solid rgba(126,184,245,0.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:600;">👁 Ver</button>
+        ${isSubmittedUser
+          ? `<button onclick="adminUnsubmit('${uid}')" style="padding:5px 10px;background:rgba(245,166,35,0.1);color:#f5a623;border:1px solid rgba(245,166,35,0.3);border-radius:8px;font-size:12px;cursor:pointer;">🔓 Desbloquear</button>`
+          : `<button onclick="adminMarkSubmitted('${uid}')" style="padding:5px 10px;background:rgba(0,200,83,0.1);color:var(--green);border:1px solid rgba(0,200,83,0.3);border-radius:8px;font-size:12px;cursor:pointer;">✓ Marcar enviado</button>`
+        }
         <button onclick="adminResetPwd('${uid}')" style="padding:5px 10px;background:transparent;border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:var(--gray);font-size:12px;cursor:pointer;">Resetar senha</button>
         <button onclick="adminDeleteUser('${uid}','${uApelido(u,uid)}')" style="padding:5px 10px;background:transparent;border:1px solid rgba(244,67,54,0.3);border-radius:8px;color:var(--red);font-size:12px;cursor:pointer;">🗑️</button>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   }
 
   // Rejected
@@ -4194,6 +4683,36 @@ async function adminResetAllUsers() {
   showToast('Todos os participantes foram removidos.');
   renderAdminParticipants();
   renderRanking();
+}
+
+async function adminMarkSubmitted(uid) {
+  const nome = state.users[uid]?.apelido || state.users[uid]?.nome || uid;
+  if (!confirm('Marcar palpites de ' + nome + ' como enviados? O participante não poderá mais editar.')) return;
+  if (!state.palpites[uid]) state.palpites[uid] = {};
+  state.palpites[uid]._submitted = true;
+  await saveGlobal();
+  // Verificar que foi salvo corretamente
+  try {
+    const fresh = await fbGet();
+    if (fresh && fresh.palpites && fresh.palpites[uid]) {
+      state.palpites[uid] = fresh.palpites[uid];
+    }
+  } catch(e) {}
+  renderAdminParticipants();
+  showToast('Palpites de ' + nome + ' marcados como enviados! ✓');
+}
+
+async function adminUnsubmit(uid) {
+  if (!confirm('Desbloquear palpites de ' + (state.users[uid]?.apelido||uid) + '? O participante poderá editar novamente.')) return;
+  if (!state.palpites[uid]) state.palpites[uid] = {};
+  delete state.palpites[uid]._submitted;
+  // Flag para evitar restauração automática pelo saveGlobal
+  state.palpites[uid]._adminUnsubmitted = true;
+  await saveGlobal();
+  // Limpar o flag temporário após salvar
+  delete state.palpites[uid]._adminUnsubmitted;
+  renderAdminParticipants();
+  showToast('Palpites desbloqueados! ✓');
 }
 
 async function adminDeleteUser(wpp, nome) {
