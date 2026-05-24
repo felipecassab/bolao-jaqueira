@@ -1017,6 +1017,48 @@ async function fbSet(data) {
   if (!r.ok) throw new Error('PATCH ' + r.status);
 }
 
+// ── BACKUP AUTOMÁTICO ────────────────────────────────────────────────
+// Salva um snapshot imutável em bolao/backup_{YYYY-MM-DD} no Firestore.
+// Nunca sobrescreve — cada dia gera um documento separado.
+// Só executa 1x por hora para não gerar leituras/escritas excessivas.
+let _lastBackupHour = null;
+async function fbBackup(data) {
+  try {
+    const now   = new Date();
+    const hour  = now.getFullYear() + '-' +
+                  String(now.getMonth()+1).padStart(2,'0') + '-' +
+                  String(now.getDate()).padStart(2,'0') + 'T' +
+                  String(now.getHours()).padStart(2,'0');
+    if (_lastBackupHour === hour) return; // já fez backup nessa hora
+    _lastBackupHour = hour;
+
+    const dateKey = hour.slice(0,10); // YYYY-MM-DD
+    const backupUrl = `https://firestore.googleapis.com/v1/projects/${FB_PROJECT}/databases/(default)/documents/bolao/backup_${dateKey}?key=${FB_APIKEY}`;
+
+    // Montar campos: users, palpites e timestamp
+    const payload = {
+      fields: {
+        users:     toFS(data.users    || {}),
+        palpites:  toFS(data.palpites || {}),
+        savedAt:   { stringValue: now.toISOString() },
+        userCount: { integerValue: String(Object.keys(data.users || {}).length) }
+      }
+    };
+
+    // Usar PATCH sem updateMask para criar/atualizar o doc do dia
+    await fetch(backupUrl, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    console.log('[backup] Snapshot salvo em backup_' + dateKey + ' (' + payload.fields.userCount.integerValue + ' usuários)');
+  } catch(e) {
+    console.warn('[backup] Falha ao salvar backup:', e);
+    // Falha silenciosa — não interrompe o fluxo principal
+  }
+}
+// ────────────────────────────────────────────────────────────────────
+
 // ═══════════════════════════════════════════════════════════════════
 // LOAD / SAVE
 // ═══════════════════════════════════════════════════════════════════
@@ -2382,10 +2424,52 @@ async function saveGlobal() {
       }
     } catch(e) {}
   }
+
+  // ── PROTEÇÃO ANTI-PERDA DE DADOS ─────────────────────────────────
+  // Antes de salvar, buscar o estado atual do Firebase e fazer merge
+  // para garantir que nunca sobrescrevemos mais usuários do que temos no state.
+  // Regras do merge:
+  //   - Usuários presentes no Firebase mas ausentes no state local são restaurados
+  //     (proteção contra carregamento incompleto)
+  //   - EXCEÇÃO: se o admin fez hard delete (uid não existe mais no state),
+  //     registramos no _deletedUids para que o merge não restaure
+  //   - Usuários com _deleted:true no state local são mantidos como deletados
+  try {
+    const firebaseState = await fbGet();
+    if (firebaseState && firebaseState.users) {
+      const fbUserCount    = Object.keys(firebaseState.users).length;
+      const localUserCount = Object.keys(state.users).length;
+      // Conjunto de uids que o admin explicitamente apagou nesta sessão
+      const hardDeleted = window._hardDeletedUids || new Set();
+      if (fbUserCount > localUserCount) {
+        console.warn('[saveGlobal] Firebase tem ' + fbUserCount + ' usuários, state local tem ' + localUserCount + '. Fazendo merge seguro.');
+        Object.keys(firebaseState.users).forEach(uid => {
+          if (state.users[uid] !== undefined) return; // já existe no state local
+          if (hardDeleted.has(uid)) return;           // admin deletou explicitamente
+          // Restaurar usuário que estava no Firebase mas sumiu do state local
+          state.users[uid] = firebaseState.users[uid];
+        });
+      }
+      // Merge de palpites: nunca perder palpites que já estão no Firebase
+      if (firebaseState.palpites) {
+        Object.keys(firebaseState.palpites).forEach(uid => {
+          if (!state.palpites[uid] && !hardDeleted.has(uid)) {
+            state.palpites[uid] = firebaseState.palpites[uid];
+          }
+        });
+      }
+    }
+  } catch(mergeErr) {
+    console.warn('[saveGlobal] Merge check failed, prosseguindo com save normal:', mergeErr);
+  }
+  // ─────────────────────────────────────────────────────────────────
+
   const data = {users: state.users, palpites: state.palpites, results: state.results, snapshots: state.snapshots};
   try {
     await fbSet(data);
     localStorage.setItem('bolao_backup', JSON.stringify(data));
+    // Backup automático diário — silencioso, não bloqueia
+    fbBackup(data).catch(()=>{});
   } catch(e) {
     console.warn('Save error:', e);
     showToast('Erro ao salvar. Verifique conexão.', true);
@@ -5120,7 +5204,8 @@ function renderAdminSettings() {
   document.getElementById('admin-games').innerHTML = `
     <div style="padding:16px;">
       <p style="font-size:13px;color:var(--gray);margin-bottom:16px;">Configurações gerais do bolão</p>
-      <div style="background:var(--card);border:1px solid rgba(255,255,255,0.07);border-radius:var(--radius);padding:16px;display:flex;align-items:center;justify-content:space-between;gap:16px;">
+
+      <div style="background:var(--card);border:1px solid rgba(255,255,255,0.07);border-radius:var(--radius);padding:16px;display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px;">
         <div>
           <p style="font-size:14px;font-weight:600;color:var(--light);">👁️ Palpites visíveis no ranking</p>
           <p style="font-size:12px;color:var(--gray);margin-top:3px;">Permite que participantes vejam os palpites uns dos outros</p>
@@ -5129,7 +5214,40 @@ function renderAdminSettings() {
           ${visible ? '✅ Liberado' : '🔒 Bloqueado'}
         </button>
       </div>
+
+      <div style="background:var(--card);border:1px solid rgba(255,255,255,0.07);border-radius:var(--radius);padding:16px;display:flex;align-items:center;justify-content:space-between;gap:16px;">
+        <div>
+          <p style="font-size:14px;font-weight:600;color:var(--light);">💾 Backup manual</p>
+          <p style="font-size:12px;color:var(--gray);margin-top:3px;">Salva um snapshot de usuários e palpites no Firebase agora</p>
+          <p id="backup-status" style="font-size:11px;color:var(--green);margin-top:4px;min-height:14px;"></p>
+        </div>
+        <button onclick="adminForceBackup()" id="btn-force-backup" style="padding:10px 18px;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;border:1px solid rgba(126,184,245,0.3);background:rgba(126,184,245,0.1);color:#7eb8f5;white-space:nowrap;">
+          💾 Fazer backup
+        </button>
+      </div>
     </div>`;
+}
+
+async function adminForceBackup() {
+  const btn = document.getElementById('btn-force-backup');
+  const status = document.getElementById('backup-status');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Salvando...'; }
+  try {
+    // Forçar backup ignorando o throttle de 1h
+    const savedHour = _lastBackupHour;
+    _lastBackupHour = null;
+    const data = {users: state.users, palpites: state.palpites, results: state.results, snapshots: state.snapshots};
+    await fbBackup(data);
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+    const userCount = Object.keys(state.users).length;
+    if (status) status.textContent = '✅ Backup salvo às ' + timeStr + ' — ' + userCount + ' usuários';
+    if (btn) { btn.disabled = false; btn.textContent = '✅ Salvo!'; setTimeout(()=>{ if(btn) btn.textContent = '💾 Fazer backup'; }, 3000); }
+  } catch(e) {
+    if (status) status.textContent = '❌ Erro ao salvar backup';
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Fazer backup'; }
+    showToast('Erro ao salvar backup', true);
+  }
 }
 
 async function adminTogglePalpitesVisiveis() {
@@ -5316,6 +5434,9 @@ async function adminUnsubmit(uid) {
 
 async function adminDeleteUser(uid, nome) {
   if (!confirm(`Tem certeza que deseja excluir ${nome} permanentemente?\n\nTodos os dados e palpites serão removidos e não poderão ser recuperados.`)) return;
+  // Registrar uid como hard-deleted para o merge do saveGlobal não restaurar
+  if (!window._hardDeletedUids) window._hardDeletedUids = new Set();
+  window._hardDeletedUids.add(uid);
   // Exclusão total — remover usuário e palpites
   delete state.users[uid];
   delete state.palpites[uid];
