@@ -2574,10 +2574,12 @@ function doForgot() {
   const pwd  = document.getElementById('f-forgot-pwd').value;
   const pwd2 = document.getElementById('f-forgot-pwd2').value;
   if (wpp.length<10)    { showErr('forgot','Informe o WhatsApp cadastrado.'); return; }
-  if (!state.users[wpp]){ showErr('forgot','WhatsApp não encontrado.'); return; }
+  // Buscar usuário pelo campo wpp (normalizado), já que a chave é o apelido
+  const uid = Object.keys(state.users).find(k => rawPhone(state.users[k].wpp||'') === wpp);
+  if (!uid)             { showErr('forgot','WhatsApp não encontrado.'); return; }
   if (pwd.length<4)     { showErr('forgot','Mínimo 4 caracteres.'); return; }
   if (pwd !== pwd2)     { showErr('forgot','As senhas não coincidem.'); return; }
-  state.users[wpp].pwd = hashPwd(pwd);
+  state.users[uid].pwd = hashPwd(pwd);
   saveGlobal();
   switchView('login');
   showToast('Senha redefinida! ✓');
