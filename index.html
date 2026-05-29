@@ -4415,7 +4415,9 @@ function renderExtras() {
   }
   const qaAnswers = state.results?._qaAnswers || {};
   EXTRA_QS.forEach(q => {
-    const val = saved[q.id]?.answer || '';
+    // Compatibilidade: pergunta F pode estar salva como 'qf' ou 'qf2'
+    const savedKey = q.id === 'qf2' && !saved['qf2'] && saved['qf'] ? 'qf' : q.id;
+    const val = saved[savedKey]?.answer || '';
     const ok = !!val.trim();
     const missing = !ok && !locked;
     const ansObj = qaAnswers[q.id];
@@ -4468,8 +4470,25 @@ async function saveExtras() {
   if (isLocked()) { showToast(isSubmitted()?'Palpites já enviados!':'Prazo encerrado!', true); return; }
   if (!state.palpites[state.user]) state.palpites[state.user]={};
   if (!state.palpites[state.user]._qa) state.palpites[state.user]._qa={};
+  // Migrar chave antiga 'qf' para 'qf2' se necessário
+  if (state.palpites[state.user]._qa['qf'] && !state.palpites[state.user]._qa['qf2']) {
+    state.palpites[state.user]._qa['qf2'] = state.palpites[state.user]._qa['qf'];
+    delete state.palpites[state.user]._qa['qf'];
+  }
   let count=0, missing=[];
-  EXTRA_QS.forEach(q=>{ const val=document.getElementById('extra_'+q.id)?.value?.trim(); if(val){ state.palpites[state.user]._qa[q.id]={answer:val,correct:null}; count++; } else missing.push(q.label); });
+  EXTRA_QS.forEach(q=>{
+    const val=document.getElementById('extra_'+q.id)?.value?.trim();
+    if(val){
+      // Preservar o correct já existente (corrigido pelo admin) — só resetar se a resposta mudou
+      const existing = state.palpites[state.user]._qa[q.id] || {};
+      const answerChanged = existing.answer?.trim() !== val;
+      state.palpites[state.user]._qa[q.id] = {
+        answer: val,
+        correct: answerChanged ? null : (existing.correct !== undefined ? existing.correct : null)
+      };
+      count++;
+    } else missing.push(q.label);
+  });
   await saveGlobal();
   renderMatches();
   renderExtras();
