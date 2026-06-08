@@ -2762,6 +2762,19 @@ document.getElementById('header-user-btn').addEventListener('click', ()=>{
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════════════
 function showPage(page, btn) {
+  // Auto-salvar rascunho ao sair da aba palpites (sem precisar clicar no botão)
+  const leavingPalpites = document.getElementById('page-palpites')?.classList.contains('active') && page !== 'palpites';
+  if (leavingPalpites && state.user && !isLocked()) {
+    // Verificar se há algum input preenchido no DOM antes de sair
+    const hasFilledInput = MATCHES.some(m => {
+      const h = document.getElementById('p_'+m.id+'_h');
+      return h && h.value !== '';
+    });
+    if (hasFilledInput) {
+      saveDraft().catch(function(){});
+    }
+  }
+
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('page-'+page).classList.add('active');
