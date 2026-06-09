@@ -1167,14 +1167,17 @@ function renderThirdsStandings(userPalpites) {
   var merged = Object.assign({}, state.palpites[state.user] || {}, state._groupDomCache || {}, userPalpites);
   var thirds = groups.map(function(g) {
     var s = calcGroupStandings(g, merged);
-    if (!s[2] || s[2].j < 3) return null;
-    return Object.assign({}, s[2], {group:g});
+    if (!s[2] || s[2].j < 1) return null;
+    // Marcar se o grupo está completo (3 jogos preenchidos) ou parcial
+    return Object.assign({}, s[2], {group:g, partial: s[2].j < 3});
   }).filter(Boolean);
   if (thirds.length === 0) return '';
   sortThirds(thirds, userPalpites);
 
   var html = '<div class="classif-wrap" style="margin-top:10px;">';
-  html += '<div class="classif-title">MELHORES TERCEIROS COLOCADOS</div>';
+  var completeCount = thirds.filter(function(t){ return !t.partial; }).length;
+  var titleSuffix = completeCount < 12 ? ' (' + thirds.length + '/12 grupos)' : '';
+  html += '<div class="classif-title">MELHORES TERCEIROS COLOCADOS' + titleSuffix + '</div>';
   html += '<table class="classif-table"><thead><tr>';
   html += '<th style="width:40%;">Seleção</th><th>PT</th><th>J</th><th>V</th><th>E</th><th>D</th><th>GP</th><th>GC</th><th>SG</th>';
   html += '</tr></thead><tbody>';
@@ -1190,6 +1193,7 @@ function renderThirdsStandings(userPalpites) {
     html += '<img src="https://flagcdn.com/w20/' + t.flag + '.png" style="width:16px;height:11px;border-radius:1px;vertical-align:middle;margin-right:4px;" onerror="this.style.display=&quot;none&quot;"/>';
     html += t.name;
     html += '<span style="font-size:10px;color:var(--gray);margin-left:4px;">(Gr.' + t.group + ')</span>';
+    if (t.partial) html += '<span style="font-size:9px;color:var(--gray);margin-left:3px;opacity:0.7;">⏳</span>';
     html += '</td>';
     html += '<td>' + t.pt + '</td><td>' + t.j + '</td><td>' + t.v + '</td><td>' + t.e + '</td><td>' + t.d + '</td>';
     html += '<td>' + t.gp + '</td><td>' + t.gc + '</td>';
@@ -3576,15 +3580,19 @@ function renderMatches() {
     if (ia) { ia.addEventListener('blur', onKoBlur); ia.addEventListener('input', onKoLiveInput); }
   });
 
-  // Progress counter
+  // Progress counter — usar DOM se preenchido, senão cair para state salvo
+  const _savedP = state.user ? (state.palpites[state.user] || {}) : {};
   const filled = MATCHES.filter(m=>{
-    const h=document.getElementById('p_'+m.id+'_h')?.value;
-    const a=document.getElementById('p_'+m.id+'_a')?.value;
+    const domH = document.getElementById('p_'+m.id+'_h')?.value;
+    const domA = document.getElementById('p_'+m.id+'_a')?.value;
+    // Preferir valor do DOM se disponível, senão usar state salvo
+    const h = (domH !== undefined && domH !== '') ? domH : (_savedP[m.id]?.h !== undefined ? String(_savedP[m.id].h) : '');
+    const a = (domA !== undefined && domA !== '') ? domA : (_savedP[m.id]?.a !== undefined ? String(_savedP[m.id].a) : '');
     if (h===''||a==='') return false;
     // Jogo knockout empatado exige pênaltis definidos para ser considerado completo
     if (m.phase==='knockout' && +h===+a) {
-      const savedP = state.user && state.palpites[state.user] && state.palpites[state.user][m.id];
-      if (!savedP || !savedP.pen) return false;
+      const savedKO = _savedP[m.id];
+      if (!savedKO || !savedKO.pen) return false;
     }
     return true;
   }).length;
