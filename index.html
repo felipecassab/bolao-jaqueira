@@ -2461,8 +2461,9 @@ async function saveGlobal() {
           if (!state.palpites[uid]) {
             state.palpites[uid] = firebaseState.palpites[uid];
           } else {
-            // Preservar _submitted do Firebase — nunca pode ser removido pelo merge local
-            if (firebaseState.palpites[uid]._submitted && !state.palpites[uid]._submitted) {
+            // Preservar _submitted do Firebase — EXCETO se o admin explicitamente desbloqueou
+            const adminUnsubmitted = state.palpites[uid]._adminUnsubmitted === true;
+            if (firebaseState.palpites[uid]._submitted && !state.palpites[uid]._submitted && !adminUnsubmitted) {
               state.palpites[uid]._submitted = true;
             }
           }
@@ -3742,18 +3743,35 @@ async function syncDraft() {
   // Save local draft too
   localStorage.setItem('bolao_draft_' + state.user, JSON.stringify(state.palpites[state.user]));
   localStorage.setItem('bolao_draft_time_' + state.user, new Date().toISOString());
-  // Save to Firebase
+  // Save to Firebase com verificação robusta
   try {
     showToast('Sincronizando...');
-    await saveGlobal();
-    // Marcar como enviado — bloqueia edição
     state.palpites[state.user]._submitted = true;
     await saveGlobal();
-    const count = Object.keys(temp).filter(k => !k.startsWith('_')).length;
-    showToast('✅ ' + count + ' palpites enviados à Comissão!');
+    // Verificar se gravou corretamente no Firebase
+    const verify = await fbGet();
+    const verifyPal = verify?.palpites?.[state.user] || {};
+    const verifyCount = Object.keys(verifyPal).filter(k => !k.startsWith('_')).length;
+    const expectedCount = Object.keys(temp).filter(k => !k.startsWith('_')).length;
+    if (!verifyPal._submitted || verifyCount < expectedCount * 0.9) {
+      console.warn('[saveDraft/submit] Verificação falhou, tentando novamente...');
+      state.palpites[state.user]._submitted = true;
+      await saveGlobal();
+      const verify2 = await fbGet();
+      const verify2Pal = verify2?.palpites?.[state.user] || {};
+      if (!verify2Pal._submitted || Object.keys(verify2Pal).filter(k => !k.startsWith('_')).length < expectedCount * 0.9) {
+        showToast('⚠️ Erro: palpites não confirmados pelo servidor. Verifique sua conexão e tente novamente!', true);
+        delete state.palpites[state.user]._submitted;
+        return;
+      }
+    }
+    localStorage.removeItem('bolao_draft_' + state.user);
+    localStorage.removeItem('bolao_draft_time_' + state.user);
+    showToast('✅ ' + expectedCount + ' palpites enviados e confirmados pela Comissão!');
     renderMatches();
   } catch(e) {
-    showToast('Erro ao sincronizar. Verifique sua conexão.', true);
+    if (state.palpites[state.user]) delete state.palpites[state.user]._submitted;
+    showToast('❌ Erro ao enviar. Verifique sua conexão e tente novamente.', true);
   }
 }
 
@@ -4048,23 +4066,44 @@ async function savePalpites() {
     if (!state.palpites[state.user]) state.palpites[state.user] = {};
     state.palpites[state.user]._submitted = true;
     await saveGlobal();
-    // Verificar se o _submitted foi realmente persistido no Firebase
+
+    // ── Verificação robusta: confirmar que Firebase realmente gravou ──
     const verify = await fbGet();
-    if (!verify?.palpites?.[state.user]?._submitted) {
-      // Não foi salvo — tentar uma vez mais diretamente
-      console.warn('[savePalpites] _submitted não encontrado no Firebase após save, tentando novamente...');
+    const verifyPal = verify?.palpites?.[state.user] || {};
+    const verifyPalCount = Object.keys(verifyPal).filter(k => !k.startsWith('_')).length;
+    const expectedCount = Object.keys(temp).filter(k => !k.startsWith('_')).length;
+
+    if (!verifyPal._submitted || verifyPalCount < expectedCount * 0.9) {
+      // Firebase não confirmou — tentar segunda vez
+      console.warn('[savePalpites] Verificação falhou (submitted=' + verifyPal._submitted + ', palpites=' + verifyPalCount + '/' + expectedCount + '). Tentando novamente...');
       state.palpites[state.user]._submitted = true;
       await saveGlobal();
+
+      // Segunda verificação
+      const verify2 = await fbGet();
+      const verify2Pal = verify2?.palpites?.[state.user] || {};
+      const verify2Count = Object.keys(verify2Pal).filter(k => !k.startsWith('_')).length;
+      if (!verify2Pal._submitted || verify2Count < expectedCount * 0.9) {
+        // Ainda falhou — alertar o usuário explicitamente
+        showToast('⚠️ Erro: palpites não confirmados pelo servidor. Verifique sua conexão e tente novamente!', true);
+        // Remover _submitted local para não bloquear nova tentativa
+        delete state.palpites[state.user]._submitted;
+        return;
+      }
     }
-    // Limpar localStorage após envio bem sucedido
+    // ─────────────────────────────────────────────────────────────────
+
+    // Limpar localStorage após envio confirmado
     localStorage.removeItem('bolao_draft_' + state.user);
     localStorage.removeItem('bolao_draft_time_' + state.user);
-    const count = Object.keys(temp).filter(k => !k.startsWith('_')).length;
-    showToast('✅ ' + count + ' palpites enviados à Comissão!');
+    showToast('✅ ' + expectedCount + ' palpites enviados e confirmados pela Comissão!');
     renderMatches();
     renderRanking();
   } catch(e) {
-    showToast('Erro ao enviar. Verifique sua conexão.', true);
+    console.error('[savePalpites] Erro:', e);
+    // Remover _submitted local para não bloquear nova tentativa
+    if (state.palpites[state.user]) delete state.palpites[state.user]._submitted;
+    showToast('❌ Erro ao enviar. Verifique sua conexão e tente novamente.', true);
   }
 }
 
