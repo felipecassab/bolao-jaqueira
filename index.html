@@ -3555,6 +3555,16 @@ function renderMatches() {
       var penPlaceholderEl = document.getElementById('pen_' + m.id);
       var existingPen = penPlaceholderEl ? penPlaceholderEl.querySelector('.penalty-selector') : null;
       var matchData = MATCHES.find(function(x){return x.id===m.id;});
+      // Recalcular resolvedTeams com valores atuais do DOM para garantir times corretos no seletor
+      var tempPLive = Object.assign({}, savedP2);
+      MATCHES.filter(function(x){return x.phase==='knockout';}).forEach(function(x){
+        var xh = document.getElementById('p_'+x.id+'_h');
+        var xa = document.getElementById('p_'+x.id+'_a');
+        if (xh && xa && xh.value !== '' && xa.value !== '') {
+          tempPLive[x.id] = Object.assign({}, savedP2[x.id]||{}, {h:+xh.value, a:+xa.value});
+        }
+      });
+      buildResolvedTeams(tempPLive);
       var rt2 = resolvedTeams[m.id];
       var homeName = (rt2 && rt2.home) ? rt2.home.name : (matchData ? matchData.home : '');
       var awayName = (rt2 && rt2.away) ? rt2.away.name : (matchData ? matchData.away : '');
