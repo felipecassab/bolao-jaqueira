@@ -2457,8 +2457,14 @@ async function saveGlobal() {
       // Merge de palpites: nunca perder palpites que já estão no Firebase
       if (firebaseState.palpites) {
         Object.keys(firebaseState.palpites).forEach(uid => {
-          if (!state.palpites[uid] && !hardDeleted.has(uid)) {
+          if (hardDeleted.has(uid)) return;
+          if (!state.palpites[uid]) {
             state.palpites[uid] = firebaseState.palpites[uid];
+          } else {
+            // Preservar _submitted do Firebase — nunca pode ser removido pelo merge local
+            if (firebaseState.palpites[uid]._submitted && !state.palpites[uid]._submitted) {
+              state.palpites[uid]._submitted = true;
+            }
           }
         });
       }
@@ -3580,19 +3586,15 @@ function renderMatches() {
     if (ia) { ia.addEventListener('blur', onKoBlur); ia.addEventListener('input', onKoLiveInput); }
   });
 
-  // Progress counter — usar DOM se preenchido, senão cair para state salvo
-  const _savedP = state.user ? (state.palpites[state.user] || {}) : {};
+  // Progress counter
   const filled = MATCHES.filter(m=>{
-    const domH = document.getElementById('p_'+m.id+'_h')?.value;
-    const domA = document.getElementById('p_'+m.id+'_a')?.value;
-    // Preferir valor do DOM se disponível, senão usar state salvo
-    const h = (domH !== undefined && domH !== '') ? domH : (_savedP[m.id]?.h !== undefined ? String(_savedP[m.id].h) : '');
-    const a = (domA !== undefined && domA !== '') ? domA : (_savedP[m.id]?.a !== undefined ? String(_savedP[m.id].a) : '');
+    const h=document.getElementById('p_'+m.id+'_h')?.value;
+    const a=document.getElementById('p_'+m.id+'_a')?.value;
     if (h===''||a==='') return false;
     // Jogo knockout empatado exige pênaltis definidos para ser considerado completo
     if (m.phase==='knockout' && +h===+a) {
-      const savedKO = _savedP[m.id];
-      if (!savedKO || !savedKO.pen) return false;
+      const savedP = state.user && state.palpites[state.user] && state.palpites[state.user][m.id];
+      if (!savedP || !savedP.pen) return false;
     }
     return true;
   }).length;
@@ -4032,10 +4034,18 @@ async function savePalpites() {
   document.getElementById('missing-alert').style.display='none';
   try {
     showToast('Sincronizando...');
-    await saveGlobal();
-    // Marcar como enviado
+    // Marcar _submitted ANTES do save para garantir que vai junto com os palpites
+    if (!state.palpites[state.user]) state.palpites[state.user] = {};
     state.palpites[state.user]._submitted = true;
     await saveGlobal();
+    // Verificar se o _submitted foi realmente persistido no Firebase
+    const verify = await fbGet();
+    if (!verify?.palpites?.[state.user]?._submitted) {
+      // Não foi salvo — tentar uma vez mais diretamente
+      console.warn('[savePalpites] _submitted não encontrado no Firebase após save, tentando novamente...');
+      state.palpites[state.user]._submitted = true;
+      await saveGlobal();
+    }
     // Limpar localStorage após envio bem sucedido
     localStorage.removeItem('bolao_draft_' + state.user);
     localStorage.removeItem('bolao_draft_time_' + state.user);
