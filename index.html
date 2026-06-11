@@ -324,7 +324,7 @@ body{display:flex;flex-direction:column}
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
           <span style="font-size:12px;background:rgba(245,197,24,0.15);color:var(--gold);padding:3px 10px;border-radius:50px;font-weight:600;">Placar exato: 5 pts</span>
           <span style="font-size:12px;background:rgba(245,197,24,0.15);color:var(--gold);padding:3px 10px;border-radius:50px;font-weight:600;">Vencedor: 3 pts</span>
-          <span id="deadline-pill" style="font-size:12px;background:rgba(0,200,83,0.12);color:var(--green);padding:3px 10px;border-radius:50px;font-weight:600;">⏳ Prazo: 10/06 às 23h59</span>
+          <span id="deadline-pill" style="font-size:12px;background:rgba(0,200,83,0.12);color:var(--green);padding:3px 10px;border-radius:50px;font-weight:600;">⏳ Prazo: 11/06 às 14h</span>
         </div>
         <p style="font-size:11px;color:var(--gray);line-height:1.5;">Bônus: 2pts(32-avos) · 4pts(oitavas) · 6pts(quartas) · 8pts(semi) · 12pts(final) · 20pts(campeã) · 3pts por pergunta extra</p>
       </div>
@@ -456,7 +456,7 @@ body{display:flex;flex-direction:column}
 
         <div style="border-top:1px solid rgba(255,255,255,0.08);margin:14px 0;"></div>
 
-        <p style="font-size:13px;color:var(--light);margin-bottom:10px;line-height:1.6;"><b>7.</b> Os palpites deverão ser enviados até as <b style="color:var(--gold);">23h59 do dia 10.06.2026</b> através do APP disponibilizado pela Comissão Organizadora.</p>
+        <p style="font-size:13px;color:var(--light);margin-bottom:10px;line-height:1.6;"><b>7.</b> Os palpites deverão ser enviados até as <b style="color:var(--gold);">14h00 do dia 11.06.2026</b> através do APP disponibilizado pela Comissão Organizadora.</p>
 
         <p style="font-size:13px;color:var(--light);margin-bottom:10px;line-height:1.6;"><b>8.</b> Serão desclassificados os participantes que praticarem atos ilegais ou que atentem contra os objetivos e regras do Bolão. O participante perderá o valor pago a título de inscrição.</p>
 
@@ -802,7 +802,7 @@ const COLORS_T = [
   '#84ffff','#ffff8d','#ea80fc','#ffbe9f','#b9f6ca',
   '#b3e5fc','#f8bbff','#f4ff81','#ffd180','#e0f7fa'
 ];
-const DEADLINE = new Date('2026-06-11T02:59:00Z');
+const DEADLINE = new Date('2026-06-11T17:00:00Z');
 const ADMIN_PWD = 'jaqueira2026';
 const PTS_EXACT = 5, PTS_WINNER = 3;
 const TAXA = 150;
@@ -2454,21 +2454,48 @@ async function saveGlobal() {
           state.users[uid] = firebaseState.users[uid];
         });
       }
-      // Merge de palpites: nunca perder palpites que já estão no Firebase
+      // ── Merge de palpites por participante (merge-before-write) ──────
+      // Para cada participante no Firebase, decidir qual versão é mais recente
+      // usando _savedAt como critério. O usuário logado é sempre autoridade
+      // sobre os próprios palpites. Para os demais, Firebase ganha se for mais recente.
       if (firebaseState.palpites) {
         Object.keys(firebaseState.palpites).forEach(uid => {
           if (hardDeleted.has(uid)) return;
+          const adminUnsubmitted = state.palpites[uid]?._adminUnsubmitted === true;
+
           if (!state.palpites[uid]) {
+            // Participante não está no state local — restaurar do Firebase
             state.palpites[uid] = firebaseState.palpites[uid];
+            return;
+          }
+
+          // Usuário logado é sempre autoridade sobre os próprios palpites
+          if (uid === state.user) {
+            // Só preservar _submitted do Firebase se não foi desbloqueado pelo admin
+            if (firebaseState.palpites[uid]._submitted && !state.palpites[uid]._submitted && !adminUnsubmitted) {
+              state.palpites[uid]._submitted = true;
+            }
+            return;
+          }
+
+          // Para outros participantes: comparar _savedAt para decidir qual versão manter
+          const fbSavedAt    = firebaseState.palpites[uid]._savedAt || '';
+          const localSavedAt = state.palpites[uid]._savedAt || '';
+
+          if (fbSavedAt > localSavedAt) {
+            // Firebase tem versão mais recente — usar Firebase, preservando flags admin locais
+            const adminFlags = {};
+            if (adminUnsubmitted) adminFlags._adminUnsubmitted = true;
+            state.palpites[uid] = Object.assign({}, firebaseState.palpites[uid], adminFlags);
           } else {
-            // Preservar _submitted do Firebase — EXCETO se o admin explicitamente desbloqueou
-            const adminUnsubmitted = state.palpites[uid]._adminUnsubmitted === true;
+            // State local tem versão igual ou mais recente — preservar _submitted do Firebase
             if (firebaseState.palpites[uid]._submitted && !state.palpites[uid]._submitted && !adminUnsubmitted) {
               state.palpites[uid]._submitted = true;
             }
           }
         });
       }
+      // ───────────────────────────────────────────────────────────────
     }
   } catch(mergeErr) {
     console.warn('[saveGlobal] Merge check failed, prosseguindo com save normal:', mergeErr);
