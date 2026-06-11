@@ -754,6 +754,20 @@ body{display:flex;flex-direction:column}
   </div>
 </div>
 
+<!-- ADMIN EDIT MODAL -->
+<div id="admin-edit-modal" style="display:none;position:fixed;inset:0;z-index:3100;background:rgba(0,0,0,0.9);overflow-y:auto;">
+  <div style="max-width:700px;margin:0 auto;padding:0 16px 24px;">
+    <div style="position:sticky;top:0;z-index:10;background:rgba(10,22,40,0.97);padding:max(14px,env(safe-area-inset-top)) 0 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.08);margin-bottom:16px;">
+      <h2 id="admin-edit-title" style="font-family:'Barlow Condensed',sans-serif;font-size:20px;color:#f5a623;margin:0;">✏️ Editando palpites</h2>
+      <div style="display:flex;gap:8px;">
+        <button onclick="adminSaveEditedPalpites()" style="padding:10px 20px;background:rgba(0,200,83,0.2);border:1px solid rgba(0,200,83,0.4);border-radius:10px;color:var(--green);font-size:14px;font-weight:700;cursor:pointer;">💾 Salvar</button>
+        <button onclick="closeAdminEdit()" style="padding:10px 20px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.2);border-radius:10px;color:var(--light);font-size:14px;font-weight:700;cursor:pointer;">✕ Fechar</button>
+      </div>
+    </div>
+    <div id="admin-edit-body"></div>
+  </div>
+</div>
+
 <!-- CHAMPION BANNER -->
 <div id="champion-banner" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(5,15,30,0.92);flex-direction:column;align-items:center;justify-content:center;padding:24px;">
   <div id="champion-banner-inner" style="background:linear-gradient(160deg,#0d2144 0%,#091628 100%);border:1px solid rgba(245,197,24,0.3);border-radius:20px;padding:32px 24px;max-width:360px;width:100%;text-align:center;position:relative;overflow:hidden;">
@@ -5456,6 +5470,7 @@ async function renderAdminParticipants() {
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button onclick="adminTogglePaid('${uid}')" title="${u.paid ? 'Marcar como pendente' : 'Marcar como pago'}" style="padding:5px 10px;border-radius:8px;font-size:13px;cursor:pointer;border:1px solid ${u.paid ? 'rgba(0,200,83,0.4)' : 'rgba(255,255,255,0.15)'};background:${u.paid ? 'rgba(0,200,83,0.12)' : 'rgba(255,255,255,0.04)'};color:${u.paid ? 'var(--green)' : 'var(--gray)'}; font-weight:700;">${u.paid ? '💰 Pago' : '⏳ Pendente'}</button>
           <button onclick="adminViewPalpites('${uid}')" style="padding:5px 10px;background:rgba(126,184,245,0.12);color:#7eb8f5;border:1px solid rgba(126,184,245,0.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:600;">👁 Ver</button>
+          <button onclick="adminEditPalpites('${uid}')" style="padding:5px 10px;background:rgba(245,166,35,0.12);color:#f5a623;border:1px solid rgba(245,166,35,0.3);border-radius:8px;font-size:12px;cursor:pointer;font-weight:600;">✏️ Editar</button>
           ${submitted ? `<button onclick="adminUnsubmit('${uid}')" style="padding:5px 10px;background:rgba(245,197,24,0.12);color:var(--gold);border:1px solid rgba(245,197,24,0.3);border-radius:8px;font-size:12px;cursor:pointer;">🔓 Desbloquear</button>` : `<button onclick="adminMarkSubmitted('${uid}')" style="padding:5px 10px;background:rgba(0,200,83,0.1);color:var(--green);border:1px solid rgba(0,200,83,0.3);border-radius:8px;font-size:12px;cursor:pointer;">✅ Marcar enviado</button>`}
           <button onclick="adminResetPwd('${uid}')" style="padding:5px 10px;background:transparent;border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:var(--gray);font-size:12px;cursor:pointer;">🔑 Senha</button>
           <button onclick="adminDeleteUser('${uid}','${uApelido(u,uid)}')" style="padding:5px 10px;background:transparent;border:1px solid rgba(244,67,54,0.3);border-radius:8px;color:var(--red);font-size:12px;cursor:pointer;">🗑️</button>
@@ -5814,6 +5829,125 @@ document.getElementById('viewer-modal').addEventListener('click', function(e) {
 function closeAdminViewer() {
   document.getElementById('admin-viewer-modal').style.display = 'none';
 }
+
+// ── EDIÇÃO DE PALPITES PELO ADMIN ────────────────────────────────────
+let _adminEditUid = null;
+
+function closeAdminEdit() {
+  document.getElementById('admin-edit-modal').style.display = 'none';
+  _adminEditUid = null;
+}
+
+async function adminEditPalpites(uid) {
+  if (!adminAuthed) return;
+  const u = state.users[uid];
+  if (!u) return;
+
+  _adminEditUid = uid;
+  document.getElementById('admin-edit-title').textContent = '✏️ Editando: ' + (u.apelido || u.nome || uid);
+  document.getElementById('admin-edit-modal').style.display = 'block';
+  document.getElementById('admin-edit-body').innerHTML = '<p style="text-align:center;color:var(--gray);padding:20px;">Carregando...</p>';
+
+  try {
+    const fresh = await fbGet();
+    if (fresh && fresh.palpites) state.palpites = fresh.palpites;
+  } catch(e) {}
+
+  const p = state.palpites[uid] || {};
+  const editResolved = {};
+  buildResolvedTeams(p, editResolved, true);
+
+  let html = '<p style="font-size:12px;color:var(--gray);margin-bottom:16px;">Edite os palpites abaixo. Clique em <b style="color:var(--green);">💾 Salvar</b> ao terminar.</p>';
+
+  const groups = {};
+  MATCHES.forEach(m => { if (!groups[m.group]) groups[m.group] = []; groups[m.group].push(m); });
+
+  Object.keys(groups).forEach(g => {
+    html += `<div class="card" style="margin-bottom:12px;">
+      <div class="card-header"><span class="group-label">${g.length <= 1 ? 'Grupo ' : ''}${g}</span></div>
+      <div class="card-body" style="padding:8px 0;">`;
+
+    groups[g].forEach(m => {
+      const mp = p[m.id] || {};
+      const rt = editResolved[m.id];
+      const homeName = (rt?.home?.name) || m.home;
+      const awayName = (rt?.away?.name) || m.away;
+      const homeFlag = (rt?.home?.flag && rt.home.flag !== 'un') ? rt.home.flag : m.fH;
+      const awayFlag = (rt?.away?.flag && rt.away.flag !== 'un') ? rt.away.flag : m.fA;
+      const hVal = mp.h !== undefined ? mp.h : '';
+      const aVal = mp.a !== undefined ? mp.a : '';
+      const penVal = mp.pen || '';
+
+      html += `<div style="display:flex;align-items:center;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.04);gap:6px;">
+        <img src="https://flagcdn.com/w20/${homeFlag}.png" style="width:16px;height:11px;border-radius:1px;flex-shrink:0;" onerror="this.style.display='none'">
+        <span style="flex:1;font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${homeName}</span>
+        <input type="number" min="0" max="99" id="ae_${m.id}_h" value="${hVal}" style="width:44px;text-align:center;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--light);font-size:15px;font-weight:700;padding:4px;font-family:'Barlow Condensed',sans-serif;">
+        <span style="color:var(--gray);font-size:13px;">:</span>
+        <input type="number" min="0" max="99" id="ae_${m.id}_a" value="${aVal}" style="width:44px;text-align:center;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:var(--light);font-size:15px;font-weight:700;padding:4px;font-family:'Barlow Condensed',sans-serif;">
+        <span style="flex:1;font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;">${awayName}</span>
+        <img src="https://flagcdn.com/w20/${awayFlag}.png" style="width:16px;height:11px;border-radius:1px;flex-shrink:0;" onerror="this.style.display='none'">
+        ${m.phase === 'knockout' ? `<select id="ae_${m.id}_pen" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:var(--gray);font-size:11px;padding:3px;margin-left:2px;">
+          <option value="" ${!penVal?'selected':''}>pen?</option>
+          <option value="H" ${penVal==='H'?'selected':''}>${homeName.slice(0,8)}</option>
+          <option value="A" ${penVal==='A'?'selected':''}>${awayName.slice(0,8)}</option>
+        </select>` : ''}
+      </div>`;
+    });
+
+    html += '</div></div>';
+  });
+
+  document.getElementById('admin-edit-body').innerHTML = html;
+}
+
+async function adminSaveEditedPalpites() {
+  if (!_adminEditUid || !adminAuthed) return;
+  const uid = _adminEditUid;
+
+  const btn = document.querySelector('#admin-edit-modal button[onclick="adminSaveEditedPalpites()"]');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Salvando...'; }
+
+  if (!state.palpites[uid]) state.palpites[uid] = {};
+
+  // Coletar valores dos inputs
+  MATCHES.forEach(m => {
+    const ih = document.getElementById('ae_' + m.id + '_h');
+    const ia = document.getElementById('ae_' + m.id + '_a');
+    if (!ih || !ia) return;
+    const hVal = ih.value.trim();
+    const aVal = ia.value.trim();
+    if (hVal !== '' && aVal !== '') {
+      if (!state.palpites[uid][m.id]) state.palpites[uid][m.id] = {};
+      state.palpites[uid][m.id].h = +hVal;
+      state.palpites[uid][m.id].a = +aVal;
+      if (m.phase === 'knockout') {
+        const ip = document.getElementById('ae_' + m.id + '_pen');
+        if (ip && ip.value) state.palpites[uid][m.id].pen = ip.value;
+        else delete state.palpites[uid][m.id].pen;
+      }
+    } else {
+      // Campo vazio = remover palpite
+      delete state.palpites[uid][m.id];
+    }
+  });
+
+  // Marcar timestamp de edição admin
+  state.palpites[uid]._savedAt = new Date().toISOString();
+  state.palpites[uid]._adminEdited = true;
+
+  try {
+    await saveGlobal();
+    showToast('✅ Palpites de ' + (state.users[uid]?.apelido || uid) + ' salvos!');
+    closeAdminEdit();
+    renderAdminParticipants();
+    renderRanking();
+  } catch(e) {
+    showToast('❌ Erro ao salvar. Tente novamente.', true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar'; }
+  }
+}
+// ─────────────────────────────────────────────────────────────────────
 
 async function adminViewPalpites(wpp) {
   if (!adminAuthed) return;
