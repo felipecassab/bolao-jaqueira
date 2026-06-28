@@ -127,6 +127,7 @@ body{display:flex;flex-direction:column}
 .score-pts-winner { background:rgba(245,197,24,0.12); color:var(--gold);  border:1px solid rgba(245,197,24,0.3); }
 .score-pts-bonus  { background:rgba(126,184,245,0.12);color:#7eb8f5;     border:1px solid rgba(126,184,245,0.3); }
 .score-pts-zero   { background:rgba(255,255,255,0.04);color:var(--gray);  border:1px solid rgba(255,255,255,0.08); }
+.score-pts-wrong  { background:rgba(244,67,54,0.15);  color:#f44336;     border:1px solid rgba(244,67,54,0.35); }
 .score-pts-extra  { background:rgba(0,200,83,0.12);  color:var(--green); border:1px solid rgba(0,200,83,0.25); }
 .score-summary-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:16px; }
 .score-summary-cell { background:rgba(255,255,255,0.04); border-radius:10px; padding:10px 6px; text-align:center; border:1px solid rgba(255,255,255,0.07); }
@@ -366,9 +367,11 @@ body{display:flex;flex-direction:column}
   <!-- PAGE: HISTÓRICO -->
   <div class="page" id="page-historico">
     <p class="sec-title">Histórico</p>
-    <div class="tabs">
-      <button class="tab-btn active" data-tab="todos" onclick="histTab('todos',this)">Todos</button>
-      <button class="tab-btn" data-tab="eu" onclick="histTab('eu',this)">Meus palpites</button>
+    <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px;scrollbar-width:none;">
+      <button class="tab-btn active" data-tab="oficial" onclick="histTab('oficial',this)" style="white-space:nowrap;flex-shrink:0;border-radius:50px;padding:8px 16px;font-size:13px;">Resultados oficiais</button>
+      <button class="tab-btn" data-tab="chave" onclick="histTab('chave',this)" style="white-space:nowrap;flex-shrink:0;border-radius:50px;padding:8px 16px;font-size:13px;">Chave</button>
+      <button class="tab-btn" data-tab="todos" onclick="histTab('todos',this)" style="white-space:nowrap;flex-shrink:0;border-radius:50px;padding:8px 16px;font-size:13px;">Palpites de todos</button>
+      <button class="tab-btn" data-tab="eu" onclick="histTab('eu',this)" style="white-space:nowrap;flex-shrink:0;border-radius:50px;padding:8px 16px;font-size:13px;">Meus palpites</button>
     </div>
     <div id="hist-content"></div>
   </div>
@@ -3409,7 +3412,7 @@ function renderMatches() {
             } else if (rW===pW) {
               return '<span style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:15px;color:#f5a623;">+3 pts</span>';
             } else {
-              return '<span style="font-family:\'Barlow Condensed\',sans-serif;font-weight:700;font-size:13px;color:var(--gray);">0 pts</span>';
+              return '<span style="font-family:\'Barlow Condensed\',sans-serif;font-weight:900;font-size:15px;color:#f44336;">0 pts</span>';
             }
           })()}
         </div>
@@ -4174,9 +4177,20 @@ function renderRanking() {
     <div class="metric"><div class="metric-val" style="color:${extrasCorrigidas===extrasTotal?'var(--green)':'var(--gold)'};">${extrasCorrigidas}<span style="font-size:14px;font-weight:500;color:var(--gray);">/${extrasTotal}</span></div><div class="metric-label">Extras corrigidas</div></div>`;
   if (!scores.length) { document.getElementById('ranking-list').innerHTML='<div class="empty"><div class="empty-icon">🏆</div><p>Nenhum participante ainda</p></div>'; return; }
   const canView = isPastDeadline();
+  // Calcular posição com empate (standard competition ranking: 1,2,2,4...)
+  // Participantes com mesma pontuação compartilham a posição
+  let _rankPos = [];
+  scores.forEach((s, i) => {
+    if (i > 0 && s.pts === scores[i-1].pts) {
+      _rankPos[i] = _rankPos[i-1]; // mesma pontuação = mesma posição
+    } else {
+      _rankPos[i] = i + 1; // nova posição (pula os empatados anteriores)
+    }
+  });
   document.getElementById('ranking-list').innerHTML = scores.map((s,i)=>{
-    const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':`#${i+1}`;
-    const cls=i===0?'color:#FFD700':i===1?'color:#C0C0C0':i===2?'color:#CD7F32':'color:var(--gray)';
+    const pos = _rankPos[i];
+    const medal = pos===1?'🥇':pos===2?'🥈':pos===3?'🥉':`#${pos}`;
+    const cls = pos===1?'color:#FFD700':pos===2?'color:#C0C0C0':pos===3?'color:#CD7F32':'color:var(--gray)';
     const clickable = `onclick="openScoreModal('${s.u}')" style="cursor:pointer;"`;
     const hint = '<span style="font-size:10px;color:var(--gold);margin-left:4px;">▸ detalhes</span>';
     buildResolvedTeams(state.palpites[s.u] || {}, null, false);
@@ -4436,70 +4450,386 @@ function renderEvolucao() {
 // RENDER HISTORICO
 // ═══════════════════════════════════════════════════════════════════
 function renderHistorico() {
-  const tab = document.querySelector('#page-historico .tab-btn.active')?.dataset?.tab||'todos';
+  const tab = document.querySelector('#page-historico .tab-btn.active')?.dataset?.tab || 'oficial';
   const el = document.getElementById('hist-content');
   if (el) _histTabRender(tab, el);
 }
 function histTab(tab, btn) {
   if (!btn) return;
-  document.querySelectorAll('#page-historico .tab-btn').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active'); btn.dataset.tab=tab;
+  document.querySelectorAll('#page-historico .tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active'); btn.dataset.tab = tab;
   const el = document.getElementById('hist-content');
   if (!el) return;
-  // Renderiza imediatamente com o que tiver no state
   _histTabRender(tab, el);
 }
+
 function _histTabRender(tab, el) {
-  const done = MATCHES.filter(m => {
-    const r = state.results[m.id];
-    return r && typeof r === 'object' && r !== null;
-  });
-  // Mostrar info na tela independente do resultado
-  const debugInfo = 'done:' + done.length + ' results:' + Object.keys(state.results||{}).length + ' users:' + Object.keys(state.users||{}).length;
-  if (!done.length) {
-    el.innerHTML='<div style="padding:16px;color:#aaa;font-size:13px;">Nenhum resultado registrado ainda<br><small>' + debugInfo + '</small></div>';
-    return;
-  }
-  const users = tab==='eu'&&state.user
-    ? [state.user]
-    : Object.keys(state.users).filter(u => {
-        const usr = state.users[u];
-        return usr && !usr._deleted && usr.status !== 'pending' && usr.status !== 'rejected';
-      });
-  let html='';
   try {
-    done.forEach(m=>{
-      const res=state.results[m.id];
-      if (!res || res.h === undefined || res.a === undefined) return;
-      const flag_h = typeof flagImg === 'function' ? flagImg(m.fH,'flag') : '';
-      const flag_a = typeof flagImg === 'function' ? flagImg(m.fA,'flag') : '';
-      html+=`<div class="hist-card"><div class="hist-header"><span style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px;">${flag_h} ${m.home||''} × ${m.away||''} ${flag_a}</span><span class="hist-result">${res.h}:${res.a}</span></div>`;
-      users.forEach(u=>{
-        const p=state.palpites[u]?.[m.id];
-        const usr=state.users[u]; if(!usr) return;
-        const rW=res.h>res.a?'H':res.h<res.a?'A':'E';
-        let badge='',guess='–';
-        if(p && p.h!==undefined && p.a!==undefined){
-          guess=`${p.h}:${p.a}`;
-          const pW=p.h>p.a?'H':p.h<p.a?'A':'E';
-          if(+p.h===+res.h&&+p.a===+res.a) badge='<span class="badge badge-gold">+5 Exato</span>';
-          else if(rW===pW) badge='<span class="badge badge-green">+3 Vencedor</span>';
-          else badge='<span class="badge badge-gray">0 pts</span>';
-        }
-        const bg=usr.color||COLORS[0]; const cl=usr.colorT||COLORS_T[0];
-        const displayName = usr.apelido || usr.nome || usr.name || u;
-        const avatarEl = usr.photo
-          ? `<div class="avatar" style="width:26px;height:26px;font-size:10px;padding:0;overflow:hidden;border-radius:50%;"><img src="${usr.photo}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>`
-          : `<div class="avatar" style="width:26px;height:26px;font-size:10px;background:${bg};color:${cl};">${initials(displayName)}</div>`;
-        html+=`<div class="hist-row">${avatarEl}<span style="font-size:13px;flex:1;">${displayName.split(' ')[0]}</span><span style="font-family:'Barlow Condensed';font-size:15px;margin-right:8px;">${guess}</span>${badge}</div>`;
-      });
-      html+='</div>';
-    });
+    if (tab === 'oficial')  { el.innerHTML = _histOficial();  return; }
+    if (tab === 'chave')    { el.innerHTML = _histChave();    return; }
+    if (tab === 'todos')    { el.innerHTML = _histTodos();    return; }
+    if (tab === 'eu')       { el.innerHTML = _histEu();       return; }
   } catch(e) {
-    el.innerHTML='<div style="padding:16px;color:red;font-size:12px;">Erro: '+e.message+'</div>';
-    return;
+    el.innerHTML = '<div style="padding:16px;color:red;font-size:12px;">Erro: ' + e.message + '</div>';
   }
-  el.innerHTML=html||'<div class="empty"><div class="empty-icon">👥</div><p>Nenhum participante ainda</p></div>';
+}
+
+// ── helpers ──────────────────────────────────────────────────────────
+function _histMatchPts(res, p) {
+  if (!res || !p || p.h === undefined || p.a === undefined) return null;
+  const rW = res.h > res.a ? 'H' : res.h < res.a ? 'A' : 'E';
+  const pW = +p.h > +p.a ? 'H' : +p.h < +p.a ? 'A' : 'E';
+  if (+p.h === +res.h && +p.a === +res.a) return 5;
+  if (rW === pW) return 3;
+  return 0;
+}
+function _histPtsBadge(pts) {
+  if (pts === 5) return '<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(0,200,83,0.18);color:var(--green);">+5 Exato</span>';
+  if (pts === 3) return '<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(245,197,24,0.18);color:var(--gold);">+3 Vencedor</span>';
+  return '<span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(244,67,54,0.18);color:#f44336;">0 pts</span>';
+}
+function _histAvatar(usr, u) {
+  const bg = usr.color || COLORS[0]; const cl = usr.colorT || COLORS_T[0];
+  const nm = usr.apelido || usr.nome || usr.name || u;
+  return usr.photo
+    ? `<div style="width:24px;height:24px;border-radius:50%;overflow:hidden;flex-shrink:0;"><img src="${usr.photo}" style="width:100%;height:100%;object-fit:cover;"></div>`
+    : `<div style="width:24px;height:24px;border-radius:50%;background:${bg};color:${cl};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0;">${initials(nm)}</div>`;
+}
+function _histGroupStandingsHtml(group, realP) {
+  const standings = calcGroupStandings(group, realP);
+  let h = `<div style="margin:4px 0 12px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.07);">`;
+  h += `<div style="padding:5px 10px;background:rgba(245,197,24,0.08);font-size:10px;font-weight:700;color:var(--gold);letter-spacing:1px;">CLASSIFICAÇÃO — GRUPO ${group}</div>`;
+  h += `<table style="width:100%;border-collapse:collapse;font-size:11px;">`;
+  h += `<tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+    <th style="padding:4px 6px;text-align:left;color:var(--gray);font-weight:600;width:28px;">Pos</th>
+    <th style="padding:4px 6px;text-align:left;color:var(--gray);font-weight:600;">Seleção</th>
+    <th style="padding:4px;text-align:center;color:var(--gray);font-weight:600;">PTS</th>
+    <th style="padding:4px;text-align:center;color:var(--gray);font-weight:600;">J</th>
+    <th style="padding:4px;text-align:center;color:var(--gray);font-weight:600;">SG</th>
+    <th style="padding:4px;text-align:center;color:var(--gray);font-weight:600;">GP</th>
+  </tr>`;
+  standings.forEach(function(t, i) {
+    const classified = i < 2;
+    const isThird = i === 2;
+    const rowBg = classified ? 'rgba(0,200,83,0.06)' : isThird ? 'rgba(245,197,24,0.04)' : 'transparent';
+    const posColor = classified ? 'var(--green)' : isThird ? 'var(--gold)' : 'var(--gray)';
+    const sg = t.gp - t.gc;
+    const badge = classified ? ' <span style="font-size:9px;color:var(--green);">✓</span>' : isThird ? ' <span style="font-size:9px;color:var(--gold);">3º</span>' : '';
+    h += `<tr style="border-bottom:1px solid rgba(255,255,255,0.03);background:${rowBg};">
+      <td style="padding:5px 6px;color:${posColor};font-weight:700;">${i+1}º${badge}</td>
+      <td style="padding:5px 6px;">${flagImg(t.flag||'un')} <span style="font-weight:500;">${t.name}</span></td>
+      <td style="padding:5px 4px;text-align:center;font-weight:700;color:var(--gold);">${t.pt}</td>
+      <td style="padding:5px 4px;text-align:center;color:var(--gray);">${t.j}</td>
+      <td style="padding:5px 4px;text-align:center;${sg>0?'color:var(--green)':sg<0?'color:#f44336':'color:var(--gray)'}">${sg>0?'+':''}${sg}</td>
+      <td style="padding:5px 4px;text-align:center;">${t.gp}</td>
+    </tr>`;
+  });
+  h += `</table></div>`;
+  return h;
+}
+
+// ── FILTRO 1: RESULTADOS OFICIAIS ────────────────────────────────────
+function _histOficial() {
+  buildResolvedTeamsFromResults();
+  const results = state.results;
+  const groups = ['A','B','C','D','E','F','G','H','I','J','K','L'];
+  const realP = Object.assign({}, results);
+  if (results._fpAdmin) realP._fp = results._fpAdmin;
+  let html = '';
+  let hasAny = false;
+
+  groups.forEach(function(g) {
+    const gMatches = MATCHES.filter(function(m){ return m.group === g && m.phase === 'group'; });
+    const played = gMatches.filter(function(m){ return results[m.id] && results[m.id].h !== undefined; });
+    if (!played.length) return;
+    hasAny = true;
+    html += `<div style="margin-bottom:4px;font-size:11px;font-weight:700;color:var(--gold);letter-spacing:1px;padding:2px 0;">GRUPO ${g}</div>`;
+    played.forEach(function(m) {
+      const res = results[m.id];
+      const rt = resolvedTeamsReal[m.id];
+      const homeName = (rt && rt.home && rt.home.name) ? rt.home.name : m.home;
+      const awayName = (rt && rt.away && rt.away.name) ? rt.away.name : m.away;
+      const homeFlag = (rt && rt.home && rt.home.flag && rt.home.flag !== 'un') ? rt.home.flag : m.fH;
+      const awayFlag = (rt && rt.away && rt.away.flag && rt.away.flag !== 'un') ? rt.away.flag : m.fA;
+      html += `<div class="hist-card" style="margin-bottom:6px;">
+        <div class="hist-header">
+          <span style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:5px;">${flagImg(homeFlag)} ${homeName} × ${awayName} ${flagImg(awayFlag)}</span>
+          <span class="hist-result">${res.h}:${res.a}</span>
+        </div>
+      </div>`;
+    });
+    // Classificação após 6 jogos do grupo
+    if (played.length === 6) {
+      html += _histGroupStandingsHtml(g, realP);
+    }
+  });
+
+  // Melhores terceiros
+  const allThirds = [];
+  groups.forEach(function(g) {
+    const gMatches = MATCHES.filter(function(m){ return m.group === g && m.phase === 'group'; });
+    if (gMatches.filter(function(m){ return results[m.id]; }).length < 6) return;
+    const s = calcGroupStandings(g, realP);
+    if (s[2] && s[2].j > 0) allThirds.push(Object.assign({}, s[2], {group: g}));
+  });
+  const fp3admin = state.results._fp3admin || [];
+  allThirds.sort(function(a,b) {
+    if (b.pt !== a.pt) return b.pt - a.pt;
+    const sgA = a.gp-a.gc, sgB = b.gp-b.gc;
+    if (sgB !== sgA) return sgB - sgA;
+    if (b.gp !== a.gp) return b.gp - a.gp;
+    const iA = fp3admin.indexOf(a.name), iB = fp3admin.indexOf(b.name);
+    if (iA !== -1 && iB !== -1) return iA - iB;
+    if (iA !== -1) return -1; if (iB !== -1) return 1;
+    return (FIFA_RANKING[a.name]||99) - (FIFA_RANKING[b.name]||99);
+  });
+  if (allThirds.length > 0) {
+    html += `<div style="margin:16px 0 6px;font-size:11px;font-weight:700;color:var(--gold);letter-spacing:1px;">MELHORES TERCEIROS COLOCADOS</div>`;
+    html += `<div style="background:var(--card);border:1px solid rgba(255,255,255,0.07);border-radius:var(--radius);overflow:hidden;margin-bottom:12px;">`;
+    html += `<table style="width:100%;border-collapse:collapse;font-size:11px;">`;
+    html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.06);background:rgba(245,197,24,0.05);">
+      <th style="padding:5px 8px;text-align:left;color:var(--gray);font-weight:600;">#</th>
+      <th style="padding:5px 8px;text-align:left;color:var(--gray);font-weight:600;">Seleção</th>
+      <th style="padding:5px 6px;text-align:center;color:var(--gray);font-weight:600;">Gr</th>
+      <th style="padding:5px 6px;text-align:center;color:var(--gray);font-weight:600;">PTS</th>
+      <th style="padding:5px 6px;text-align:center;color:var(--gray);font-weight:600;">SG</th>
+      <th style="padding:5px 6px;text-align:center;color:var(--gray);font-weight:600;">GP</th>
+    </tr>`;
+    allThirds.slice(0, 8).forEach(function(t, i) {
+      const qualified = i < 8;
+      const sg = t.gp - t.gc;
+      html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.03);background:${qualified?'rgba(0,200,83,0.05)':'transparent'}">
+        <td style="padding:5px 8px;font-weight:700;color:${qualified?'var(--green)':'var(--gray)'};">${i+1}º${qualified?' ✓':''}</td>
+        <td style="padding:5px 8px;">${flagImg(t.flag||'un')} ${t.name}</td>
+        <td style="padding:5px 6px;text-align:center;color:var(--gray);">${t.group}</td>
+        <td style="padding:5px 6px;text-align:center;font-weight:700;color:var(--gold);">${t.pt}</td>
+        <td style="padding:5px 6px;text-align:center;${sg>0?'color:var(--green)':sg<0?'color:#f44336':'color:var(--gray)'}">${sg>0?'+':''}${sg}</td>
+        <td style="padding:5px 6px;text-align:center;">${t.gp}</td>
+      </tr>`;
+    });
+    html += `</table></div>`;
+  }
+
+  // 32-avos com times resolvidos reais
+  const r32 = MATCHES.filter(function(m){ return m.group === '32-avos'; });
+  const r32Played = r32.filter(function(m){ return results[m.id] && results[m.id].h !== undefined; });
+  if (r32Played.length || r32.some(function(m){ return resolvedTeamsReal[m.id]; })) {
+    html += `<div style="margin:16px 0 6px;font-size:11px;font-weight:700;color:var(--gold);letter-spacing:1px;">32-AVOS DE FINAL</div>`;
+    r32.forEach(function(m) {
+      const res = results[m.id];
+      const rt = resolvedTeamsReal[m.id];
+      const homeName = (rt && rt.home && rt.home.name) ? rt.home.name : m.home;
+      const awayName = (rt && rt.away && rt.away.name) ? rt.away.name : m.away;
+      const homeFlag = (rt && rt.home && rt.home.flag && rt.home.flag !== 'un') ? rt.home.flag : m.fH;
+      const awayFlag = (rt && rt.away && rt.away.flag && rt.away.flag !== 'un') ? rt.away.flag : m.fA;
+      const matchNum = MATCH_NUMBERS[m.id] || '';
+      html += `<div class="hist-card" style="margin-bottom:6px;">
+        <div class="hist-header">
+          <span style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:5px;">${flagImg(homeFlag)} ${homeName} × ${awayName} ${flagImg(awayFlag)}<span style="font-size:10px;color:var(--gray);margin-left:4px;">M${matchNum}</span></span>
+          <span class="hist-result">${res ? res.h+':'+res.a : '–'}</span>
+        </div>
+      </div>`;
+    });
+  }
+
+  // Oitavas, quartas, semi, final...
+  ['Oitavas','Quartas','Semi','3º Lugar','Final'].forEach(function(phase) {
+    const phaseMatches = MATCHES.filter(function(m){
+      if (phase === 'Oitavas')   return m.group === 'Oitavas';
+      if (phase === 'Quartas')   return m.group === 'Quartas';
+      if (phase === 'Semi')      return m.group === 'Semi';
+      if (phase === '3º Lugar')  return m.group === '3º Lugar';
+      if (phase === 'Final')     return m.group === 'Final';
+      return false;
+    });
+    const anyResult = phaseMatches.some(function(m){ return results[m.id]; });
+    const anyResolved = phaseMatches.some(function(m){ return resolvedTeamsReal[m.id]; });
+    if (!anyResult && !anyResolved) return;
+    html += `<div style="margin:16px 0 6px;font-size:11px;font-weight:700;color:var(--gold);letter-spacing:1px;">${phase.toUpperCase()}</div>`;
+    phaseMatches.forEach(function(m) {
+      const res = results[m.id];
+      const rt = resolvedTeamsReal[m.id];
+      const homeName = (rt && rt.home && rt.home.name) ? rt.home.name : m.home;
+      const awayName = (rt && rt.away && rt.away.name) ? rt.away.name : m.away;
+      const homeFlag = (rt && rt.home && rt.home.flag && rt.home.flag !== 'un') ? rt.home.flag : m.fH;
+      const awayFlag = (rt && rt.away && rt.away.flag && rt.away.flag !== 'un') ? rt.away.flag : m.fA;
+      html += `<div class="hist-card" style="margin-bottom:6px;">
+        <div class="hist-header">
+          <span style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:5px;">${flagImg(homeFlag)} ${homeName} × ${awayName} ${flagImg(awayFlag)}</span>
+          <span class="hist-result">${res ? res.h+':'+res.a+(res.pen?'<span style="font-size:10px;color:var(--gray);margin-left:4px;">(pen)</span>':'') : '–'}</span>
+        </div>
+      </div>`;
+    });
+  });
+
+  if (!hasAny) return '<div style="padding:24px;text-align:center;color:var(--gray);">Nenhum resultado registrado ainda.</div>';
+  return html;
+}
+
+// ── FILTRO 2: CHAVE ───────────────────────────────────────────────────
+function _histChave() {
+  buildResolvedTeamsFromResults();
+  const results = state.results;
+
+  function teamBox(m, side) {
+    const rt = resolvedTeamsReal[m.id];
+    const name  = side==='H' ? ((rt&&rt.home&&rt.home.name)?rt.home.name:m.home) : ((rt&&rt.away&&rt.away.name)?rt.away.name:m.away);
+    const flag  = side==='H' ? ((rt&&rt.home&&rt.home.flag&&rt.home.flag!=='un')?rt.home.flag:m.fH) : ((rt&&rt.away&&rt.away.flag&&rt.away.flag!=='un')?rt.away.flag:m.fA);
+    const res   = results[m.id];
+    const score = res ? (side==='H'?res.h:res.a) : null;
+    const won   = res && ((side==='H' && (res.h>res.a || res.pen==='H')) || (side==='A' && (res.a>res.h || res.pen==='A')));
+    return `<div style="display:flex;align-items:center;gap:4px;padding:4px 6px;${won?'background:rgba(0,200,83,0.08);':''}border-bottom:1px solid rgba(255,255,255,0.04);">
+      ${flagImg(flag||'un')}
+      <span style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${won?'var(--green)':'var(--light)'};">${name||'–'}</span>
+      ${score!==null?`<span style="font-size:13px;font-weight:700;font-family:'Barlow Condensed',sans-serif;color:${won?'var(--green)':'var(--light)'};">${score}</span>`:'<span style="font-size:13px;color:var(--gray);">–</span>'}
+    </div>`;
+  }
+
+  function matchCard(m) {
+    const matchNum = MATCH_NUMBERS[m.id] || '';
+    return `<div style="background:var(--card);border:1px solid rgba(255,255,255,0.08);border-radius:8px;overflow:hidden;margin-bottom:4px;">
+      <div style="padding:2px 6px;font-size:9px;color:var(--gray);background:rgba(255,255,255,0.03);">M${matchNum} · ${m.date||''}</div>
+      ${teamBox(m,'H')}${teamBox(m,'A')}
+    </div>`;
+  }
+
+  // Organizar por fases
+  const r32  = MATCHES.filter(function(m){ return m.group==='32-avos'; });
+  const r16  = MATCHES.filter(function(m){ return m.group==='Oitavas'; });
+  const qf   = MATCHES.filter(function(m){ return m.group==='Quartas'; });
+  const sf   = MATCHES.filter(function(m){ return m.group==='Semi'; });
+  const tp   = MATCHES.filter(function(m){ return m.group==='3º Lugar'; });
+  const fin  = MATCHES.filter(function(m){ return m.group==='Final'; });
+
+  let html = `<p style="font-size:11px;color:var(--gray);margin-bottom:12px;">↔️ Arraste para ver todas as fases</p>`;
+  html += `<div style="overflow-x:auto;padding-bottom:8px;">`;
+  html += `<div style="display:flex;gap:8px;min-width:max-content;align-items:flex-start;">`;
+
+  // Coluna 32-avos
+  html += `<div style="min-width:160px;">`;
+  html += `<div style="font-size:10px;font-weight:700;color:var(--gold);letter-spacing:1px;text-align:center;padding:4px 0 8px;">32-AVOS</div>`;
+  r32.forEach(function(m){ html += matchCard(m); });
+  html += `</div>`;
+
+  // Coluna Oitavas
+  html += `<div style="min-width:160px;">`;
+  html += `<div style="font-size:10px;font-weight:700;color:var(--gold);letter-spacing:1px;text-align:center;padding:4px 0 8px;">OITAVAS</div>`;
+  r16.forEach(function(m){ html += matchCard(m); });
+  html += `</div>`;
+
+  // Coluna Quartas
+  html += `<div style="min-width:160px;">`;
+  html += `<div style="font-size:10px;font-weight:700;color:var(--gold);letter-spacing:1px;text-align:center;padding:4px 0 8px;">QUARTAS</div>`;
+  qf.forEach(function(m){ html += matchCard(m); });
+  html += `</div>`;
+
+  // Coluna Semi + Final + 3º
+  html += `<div style="min-width:160px;">`;
+  html += `<div style="font-size:10px;font-weight:700;color:var(--gold);letter-spacing:1px;text-align:center;padding:4px 0 8px;">SEMI</div>`;
+  sf.forEach(function(m){ html += matchCard(m); });
+  html += `<div style="font-size:10px;font-weight:700;color:var(--gold);letter-spacing:1px;text-align:center;padding:8px 0 8px;">FINAL</div>`;
+  fin.forEach(function(m){ html += matchCard(m); });
+  html += `<div style="font-size:10px;font-weight:700;color:var(--gray);letter-spacing:1px;text-align:center;padding:8px 0 8px;">3º LUGAR</div>`;
+  tp.forEach(function(m){ html += matchCard(m); });
+  html += `</div>`;
+
+  html += `</div></div>`;
+  return html;
+}
+
+// ── FILTRO 3: PALPITES DE TODOS ───────────────────────────────────────
+function _histTodos() {
+  const results = state.results;
+  const done = MATCHES.filter(function(m){
+    const r = results[m.id];
+    return r && r.h !== undefined;
+  });
+  if (!done.length) return '<div style="padding:24px;text-align:center;color:var(--gray);">Nenhum resultado registrado ainda.</div>';
+
+  const users = Object.keys(state.users).filter(function(u) {
+    const usr = state.users[u];
+    return usr && !usr._deleted && usr.status !== 'pending' && usr.status !== 'rejected';
+  }).sort(function(a, b) {
+    const na = (state.users[a].apelido||state.users[a].nome||a).toLowerCase();
+    const nb = (state.users[b].apelido||state.users[b].nome||b).toLowerCase();
+    return na.localeCompare(nb);
+  });
+
+  let html = '';
+  done.forEach(function(m) {
+    const res = results[m.id];
+    const rt = resolvedTeamsReal[m.id];
+    const homeName = (rt&&rt.home&&rt.home.name)?rt.home.name:m.home;
+    const awayName = (rt&&rt.away&&rt.away.name)?rt.away.name:m.away;
+    const homeFlag = (rt&&rt.home&&rt.home.flag&&rt.home.flag!=='un')?rt.home.flag:m.fH;
+    const awayFlag = (rt&&rt.away&&rt.away.flag&&rt.away.flag!=='un')?rt.away.flag:m.fA;
+    const expanded = '_hist_exp_' + m.id;
+
+    const acertos = users.filter(function(u){
+      const p = state.palpites[u]&&state.palpites[u][m.id];
+      return p && _histMatchPts(res,p) !== null;
+    }).length;
+
+    html += `<div class="hist-card" style="margin-bottom:8px;">
+      <div class="hist-header" onclick="document.getElementById('${expanded}').style.display=document.getElementById('${expanded}').style.display==='none'?'block':'none'" style="cursor:pointer;">
+        <span style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:5px;">${flagImg(homeFlag)} ${homeName} × ${awayName} ${flagImg(awayFlag)}</span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="hist-result">${res.h}:${res.a}</span>
+          <span style="font-size:18px;color:var(--gray);">▼</span>
+        </div>
+      </div>
+      <div id="${expanded}" style="display:none;">
+        <div style="padding:4px 14px;font-size:11px;color:var(--gray);border-bottom:1px solid rgba(255,255,255,0.04);">${acertos} de ${users.length} acertaram o vencedor ou mais</div>`;
+
+    users.forEach(function(u) {
+      const usr = state.users[u]; if (!usr) return;
+      const p = state.palpites[u] && state.palpites[u][m.id];
+      const pts = p ? _histMatchPts(res, p) : null;
+      const guess = p && p.h !== undefined ? `${p.h}:${p.a}` : '–';
+      const badge = pts !== null ? _histPtsBadge(pts) : '';
+      const displayName = usr.apelido || usr.nome || usr.name || u;
+      html += `<div class="hist-row">${_histAvatar(usr,u)}<span style="font-size:13px;flex:1;">${displayName}</span><span style="font-family:'Barlow Condensed';font-size:15px;margin-right:8px;">${guess}</span>${badge}</div>`;
+    });
+
+    html += `</div></div>`;
+  });
+  return html;
+}
+
+// ── FILTRO 4: MEUS PALPITES ───────────────────────────────────────────
+function _histEu() {
+  if (!state.user) return '<div style="padding:24px;text-align:center;color:var(--gray);">Faça login para ver seus palpites.</div>';
+  const results = state.results;
+  const done = MATCHES.filter(function(m){
+    const r = results[m.id];
+    return r && r.h !== undefined;
+  });
+  if (!done.length) return '<div style="padding:24px;text-align:center;color:var(--gray);">Nenhum resultado registrado ainda.</div>';
+
+  const usr = state.users[state.user];
+  let html = '';
+  done.forEach(function(m) {
+    const res = results[m.id];
+    const rt = resolvedTeamsReal[m.id];
+    const homeName = (rt&&rt.home&&rt.home.name)?rt.home.name:m.home;
+    const awayName = (rt&&rt.away&&rt.away.name)?rt.away.name:m.away;
+    const homeFlag = (rt&&rt.home&&rt.home.flag&&rt.home.flag!=='un')?rt.home.flag:m.fH;
+    const awayFlag = (rt&&rt.away&&rt.away.flag&&rt.away.flag!=='un')?rt.away.flag:m.fA;
+    const p = state.palpites[state.user] && state.palpites[state.user][m.id];
+    const pts = p ? _histMatchPts(res, p) : null;
+    const guess = p && p.h !== undefined ? `${p.h}:${p.a}` : '–';
+    const badge = pts !== null ? _histPtsBadge(pts) : '';
+    const displayName = usr ? (usr.apelido||usr.nome||usr.name||state.user) : state.user;
+
+    html += `<div class="hist-card" style="margin-bottom:8px;">
+      <div class="hist-header">
+        <span style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:5px;">${flagImg(homeFlag)} ${homeName} × ${awayName} ${flagImg(awayFlag)}</span>
+        <span class="hist-result">${res.h}:${res.a}</span>
+      </div>
+      <div class="hist-row">${_histAvatar(usr,state.user)}<span style="font-size:13px;flex:1;">${displayName}</span><span style="font-family:'Barlow Condensed';font-size:15px;margin-right:8px;">${guess}</span>${badge}</div>
+    </div>`;
+  });
+  return html;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -6969,7 +7299,7 @@ async function openScoreModal(uid) {
             if (+p.h === res.h && +p.a === res.a) { pts = 5; type = 'exact'; }
             else if (rW === pW) { pts = 3; type = 'winner'; }
           }
-          const ptsClass = type === 'exact' ? 'score-pts-exact' : type === 'winner' ? 'score-pts-winner' : 'score-pts-zero';
+          const ptsClass = type === 'exact' ? 'score-pts-exact' : type === 'winner' ? 'score-pts-winner' : (pts === 0 && p && p.h !== undefined ? 'score-pts-wrong' : 'score-pts-zero');
           phaseHtml += '<div class="score-match-row">' +
             '<span class="score-pts-badge ' + ptsClass + '">' + (pts > 0 ? '+' + pts : '0') + '</span>' +
             '<img src="https://flagcdn.com/w20/' + homeFlag + '.png" style="width:16px;height:11px;border-radius:1px;flex-shrink:0;" onerror="this.style.display=&quot;none&quot;">' +
@@ -7129,14 +7459,29 @@ async function openScoreModal(uid) {
     const userQ   = qa[q.id];           // user's answer object (may be undefined)
     const ans     = qaAnswers[q.id];    // admin's correction (may be undefined)
     const userAns = userQ ? (userQ.answer || '—') : '—';
-    const correct = userQ && userQ.correct === true;
-    const graded  = userQ && userQ.correct !== null && userQ.correct !== undefined;
     const corrAns = ans ? (ans.correct || '') : '';
+
+    // Determinar se está correto:
+    //  1. Se o admin marcou correct individual (true/false) → usa isso
+    //  2. Senão, se há gabarito oficial → compara via matchScore
+    //  3. Senão → ainda não avaliado (?)
+    let correct = false;
+    let graded  = false;
+    if (userQ && userQ.answer) {
+      if (userQ.correct === true)  { correct = true;  graded = true; }
+      else if (userQ.correct === false) { correct = false; graded = true; }
+      else if (corrAns) {
+        // Há gabarito mas não foi marcado individualmente — derivar pelo matchScore
+        const score = matchScore(userQ.answer, corrAns);
+        correct = score >= 0.8;
+        graded  = true;
+      }
+    }
 
     // Badge: green +3 if correct, red 0 if graded wrong, gray ? if not graded yet
     var badgeClass, badgeText;
     if (correct)        { badgeClass = 'score-pts-extra'; badgeText = '+3'; }
-    else if (graded)    { badgeClass = 'score-pts-zero';  badgeText = '0'; }
+    else if (graded)    { badgeClass = 'score-pts-wrong'; badgeText = '0'; }
     else                { badgeClass = 'score-pts-zero';  badgeText = '?'; }
 
     extrasHtml += '<div style="padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
