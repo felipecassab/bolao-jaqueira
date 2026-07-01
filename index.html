@@ -7393,12 +7393,14 @@ async function openScoreModal(uid) {
           const realTeams = new Set();
           const realFlags = new Map();
           if (grp === '32-avos') {
-            // Teams that actually reached r32 (stored in results as homeTeam/awayTeam)
+            // Classificados REAIS aos 32-avos = 1o/2o/melhores 3os das tabelas de
+            // grupos, resolvidos em resolvedTeamsReal assim que os grupos terminam.
+            // NAO depende de o jogo de 32-avos ja ter sido disputado (idem calcBonusPts),
+            // por isso o destaque +2 aparece assim que a classificacao e conhecida.
             MATCHES.filter(function(m){ return m.group==='32-avos'; }).forEach(function(m){
-              const res2 = state.results[m.id]; if (!res2) return;
-              const rtr2 = resolvedTeamsReal[m.id];
-              if (res2.homeTeam) { realTeams.add(res2.homeTeam); if (rtr2?.home?.flag) realFlags.set(res2.homeTeam, rtr2.home.flag); }
-              if (res2.awayTeam) { realTeams.add(res2.awayTeam); if (rtr2?.away?.flag) realFlags.set(res2.awayTeam, rtr2.away.flag); }
+              const rtr2 = resolvedTeamsReal[m.id]; if (!rtr2) return;
+              if (rtr2.home && rtr2.home.name) { realTeams.add(rtr2.home.name); if (rtr2.home.flag) realFlags.set(rtr2.home.name, rtr2.home.flag); }
+              if (rtr2.away && rtr2.away.name) { realTeams.add(rtr2.away.name); if (rtr2.away.flag) realFlags.set(rtr2.away.name, rtr2.away.flag); }
             });
           } else {
             // Real winners of previous phase matches
